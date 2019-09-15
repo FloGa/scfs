@@ -439,7 +439,6 @@ impl Filesystem for SplitFS {
             if offset == 0 {
                 let attr =
                     convert_metadata_to_attr(fs::metadata(&file_info.path).unwrap(), file_info.ino);
-                let is_vdir = attr.kind == FileType::RegularFile;
                 reply.add(file_info.ino, 0, FileType::Directory, ".");
                 reply.add(file_info.parent_ino.max(1), 1, FileType::Directory, "..");
                 let mut stmt = self
@@ -459,7 +458,7 @@ impl Filesystem for SplitFS {
                     reply.add(
                         item.ino,
                         (off + 2) as i64,
-                        if is_vdir {
+                        if item.part > 0 {
                             FileType::RegularFile
                         } else {
                             FileType::Directory
