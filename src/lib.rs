@@ -437,10 +437,6 @@ impl Filesystem for SplitFS {
 
         if let Ok(file_info) = file_info {
             if offset == 0 {
-                let attr =
-                    convert_metadata_to_attr(fs::metadata(&file_info.path).unwrap(), file_info.ino);
-                reply.add(file_info.ino, 0, FileType::Directory, ".");
-                reply.add(file_info.parent_ino.max(1), 1, FileType::Directory, "..");
                 let mut stmt = self
                     .file_db
                     .prepare_cached(STMT_QUERY_BY_PARENT_INO)
