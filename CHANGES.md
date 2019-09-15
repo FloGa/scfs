@@ -1,4 +1,4 @@
-# Changes in 0.2.0-RC
+# Changes in 0.2.0
 
 -   Do not include . and .. for now
     
