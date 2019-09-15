@@ -19,7 +19,7 @@ const TTL: Timespec = Timespec { sec: 1, nsec: 0 };
 
 const STMT_INSERT: &str = "INSERT INTO Files (ino, parent_ino, path, part) VALUES (?, ?, ?, ?)";
 const STMT_QUERY_BY_INO: &str = "SELECT * FROM Files WHERE ino = ?";
-const STMT_QUERY_BY_PARENT_INO: &str = "SELECT * FROM Files WHERE parent_ino = ?";
+const STMT_QUERY_BY_PARENT_INO: &str = "SELECT * FROM Files WHERE parent_ino = ? LIMIT -1 OFFSET ?";
 const STMT_QUERY_LAST_INO: &str = "SELECT * FROM Files ORDER BY _rowid_ DESC LIMIT 1";
 
 const BLOCK_SIZE: u64 = 2 * 1024 * 1024;
@@ -261,7 +261,7 @@ impl SplitFS {
             .unwrap();
 
         let inos = stmt
-            .query_map(params![parent_ino], |row| Ok(FileInfo::from(row).ino))
+            .query_map(params![parent_ino, 0], |row| Ok(FileInfo::from(row).ino))
             .unwrap();
 
         let file_info = inos
@@ -436,7 +436,6 @@ impl Filesystem for SplitFS {
         let file_info = self.get_file_info_from_ino(ino);
 
         if let Ok(file_info) = file_info {
-            if offset == 0 {
                 let mut stmt = self
                     .file_db
                     .prepare_cached(STMT_QUERY_BY_PARENT_INO)
@@ -444,7 +443,8 @@ impl Filesystem for SplitFS {
                 let items = stmt
                     .query_map(
                         params![
-                            FileInfoRow::from(FileInfo::with_parent_ino(file_info.ino)).parent_ino
+                            FileInfoRow::from(FileInfo::with_parent_ino(file_info.ino)).parent_ino,
+                            offset
                         ],
                         |row| Ok(FileInfo::from(row)),
                     )
@@ -453,7 +453,7 @@ impl Filesystem for SplitFS {
                     let item = item.unwrap();
                     reply.add(
                         item.ino,
-                        (off + 2) as i64,
+                        offset + off as i64 + 1,
                         if item.part > 0 {
                             FileType::RegularFile
                         } else {
@@ -461,7 +461,6 @@ impl Filesystem for SplitFS {
                         },
                         Path::new(&item.path).file_name().unwrap(),
                     );
-                }
             }
             reply.ok();
         } else {
