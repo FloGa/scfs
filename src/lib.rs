@@ -436,31 +436,31 @@ impl Filesystem for SplitFS {
         let file_info = self.get_file_info_from_ino(ino);
 
         if let Ok(file_info) = file_info {
-                let mut stmt = self
-                    .file_db
-                    .prepare_cached(STMT_QUERY_BY_PARENT_INO)
-                    .unwrap();
-                let items = stmt
-                    .query_map(
-                        params![
-                            FileInfoRow::from(FileInfo::with_parent_ino(file_info.ino)).parent_ino,
-                            offset
-                        ],
-                        |row| Ok(FileInfo::from(row)),
-                    )
-                    .unwrap();
-                for (off, item) in items.enumerate() {
-                    let item = item.unwrap();
-                    reply.add(
-                        item.ino,
-                        offset + off as i64 + 1,
-                        if item.part > 0 {
-                            FileType::RegularFile
-                        } else {
-                            FileType::Directory
-                        },
-                        Path::new(&item.path).file_name().unwrap(),
-                    );
+            let mut stmt = self
+                .file_db
+                .prepare_cached(STMT_QUERY_BY_PARENT_INO)
+                .unwrap();
+            let items = stmt
+                .query_map(
+                    params![
+                        FileInfoRow::from(FileInfo::with_parent_ino(file_info.ino)).parent_ino,
+                        offset
+                    ],
+                    |row| Ok(FileInfo::from(row)),
+                )
+                .unwrap();
+            for (off, item) in items.enumerate() {
+                let item = item.unwrap();
+                reply.add(
+                    item.ino,
+                    offset + off as i64 + 1,
+                    if item.part > 0 {
+                        FileType::RegularFile
+                    } else {
+                        FileType::Directory
+                    },
+                    Path::new(&item.path).file_name().unwrap(),
+                );
             }
             reply.ok();
         } else {
