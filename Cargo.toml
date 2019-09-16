@@ -1,6 +1,6 @@
 [package]
 name = "scfs"
-version = "0.3.0"
+version = "0.4.0-SNAPSHOT"
 authors = ["Florian Gamböck <mail@floga.de>"]
 edition = "2018"
 
