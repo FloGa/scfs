@@ -4,6 +4,12 @@ version = "0.3.0-SNAPSHOT"
 authors = ["Florian Gamböck <mail@floga.de>"]
 edition = "2018"
 
+description = "A convenient splitting and concatenating filesystem."
+repository = "https://github.com/FloGa/scfs"
+readme = "README.md"
+categories = ["filesystem"]
+license = "WTFPL"
+
 [dependencies]
 fuse = "0.3.1"
 libc = "0.2.62"
