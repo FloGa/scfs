@@ -1,4 +1,4 @@
-# Changes in 0.3.0-RC
+# Changes in 0.3.0
 
 First public release on crates.io. No other changes.
 
