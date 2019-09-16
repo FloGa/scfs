@@ -1,5 +1,7 @@
 # Changes since latest release
 
+First public release on crates.io. No other changes.
+
 # Changes in 0.2.0
 
 -   Do not include . and .. for now
