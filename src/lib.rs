@@ -233,81 +233,13 @@ impl From<FileInfo> for FileInfoRow {
     }
 }
 
-fn populate<P: AsRef<Path>>(file_db: &Connection, path: P, parent_ino: u64) {
-    let path = path.as_ref();
-
-    let mut attr = convert_metadata_to_attr(path.metadata().unwrap(), 0);
-
-    attr.ino = if parent_ino == 0 {
-        1
-    } else {
-        file_db
-            .prepare_cached(STMT_QUERY_LAST_INO)
-            .unwrap()
-            .query_map(NO_PARAMS, |row| Ok(FileInfo::from(row).ino))
-            .unwrap()
-            .next()
-            .unwrap()
-            .unwrap()
-            + 1
-    };
-
-    let file_info = FileInfoRow::from(FileInfo {
-        ino: attr.ino,
-        parent_ino,
-        path: OsString::from(path),
-        part: 0,
-    });
-
-    file_db
-        .prepare_cached(STMT_INSERT)
-        .unwrap()
-        .execute(params![
-            file_info.ino,
-            file_info.parent_ino,
-            file_info.path,
-            file_info.part
-        ])
-        .unwrap();
-
-    if let FileType::RegularFile = attr.kind {
-        let blocks = f64::ceil(attr.size as f64 / BLOCK_SIZE as f64) as u64;
-        for i in 0..blocks {
-            let file_info = FileInfoRow::from(FileInfo {
-                ino: attr.ino + i + 1,
-                parent_ino: attr.ino,
-                path: OsString::from(path.join(format!("scfs.{:010}", i))),
-                part: i + 1,
-            });
-
-            file_db
-                .prepare_cached(STMT_INSERT)
-                .unwrap()
-                .execute(params![
-                    file_info.ino,
-                    file_info.parent_ino,
-                    file_info.path,
-                    file_info.part
-                ])
-                .unwrap();
-        }
-    }
-
-    if path.is_dir() {
-        for entry in fs::read_dir(path).unwrap() {
-            let entry = entry.unwrap();
-            populate(&file_db, entry.path(), attr.ino);
-        }
-    }
-}
-
 impl SplitFS {
     pub fn new(mirror: OsString) -> SplitFS {
         let file_db = Connection::open_in_memory().unwrap();
 
         file_db.execute(STMT_CREATE, NO_PARAMS).unwrap();
 
-        populate(&file_db, &mirror, 0);
+        SplitFS::populate(&file_db, &mirror, 0);
 
         let file_handles = Default::default();
 
@@ -360,6 +292,74 @@ impl SplitFS {
         match file_info {
             Some(f) => Ok(f),
             None => Err(Error::QueryReturnedNoRows),
+        }
+    }
+
+    fn populate<P: AsRef<Path>>(file_db: &Connection, path: P, parent_ino: u64) {
+        let path = path.as_ref();
+
+        let mut attr = convert_metadata_to_attr(path.metadata().unwrap(), 0);
+
+        attr.ino = if parent_ino == 0 {
+            1
+        } else {
+            file_db
+                .prepare_cached(STMT_QUERY_LAST_INO)
+                .unwrap()
+                .query_map(NO_PARAMS, |row| Ok(FileInfo::from(row).ino))
+                .unwrap()
+                .next()
+                .unwrap()
+                .unwrap()
+                + 1
+        };
+
+        let file_info = FileInfoRow::from(FileInfo {
+            ino: attr.ino,
+            parent_ino,
+            path: OsString::from(path),
+            part: 0,
+        });
+
+        file_db
+            .prepare_cached(STMT_INSERT)
+            .unwrap()
+            .execute(params![
+                file_info.ino,
+                file_info.parent_ino,
+                file_info.path,
+                file_info.part
+            ])
+            .unwrap();
+
+        if let FileType::RegularFile = attr.kind {
+            let blocks = f64::ceil(attr.size as f64 / BLOCK_SIZE as f64) as u64;
+            for i in 0..blocks {
+                let file_info = FileInfoRow::from(FileInfo {
+                    ino: attr.ino + i + 1,
+                    parent_ino: attr.ino,
+                    path: OsString::from(path.join(format!("scfs.{:010}", i))),
+                    part: i + 1,
+                });
+
+                file_db
+                    .prepare_cached(STMT_INSERT)
+                    .unwrap()
+                    .execute(params![
+                        file_info.ino,
+                        file_info.parent_ino,
+                        file_info.path,
+                        file_info.part
+                    ])
+                    .unwrap();
+            }
+        }
+
+        if path.is_dir() {
+            for entry in fs::read_dir(path).unwrap() {
+                let entry = entry.unwrap();
+                SplitFS::populate(&file_db, entry.path(), attr.ino);
+            }
         }
     }
 }
