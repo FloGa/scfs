@@ -10,6 +10,8 @@ readme = "README.md"
 categories = ["filesystem"]
 license = "WTFPL"
 
+exclude = ["/bump"]
+
 [dependencies]
 fuse = "0.3.1"
 libc = "0.2.62"
