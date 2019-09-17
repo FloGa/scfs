@@ -1,5 +1,6 @@
 use std::env;
 use std::ffi::OsStr;
+use std::sync::mpsc::channel;
 
 use scfs::SplitFS;
 
@@ -11,5 +12,15 @@ fn main() {
         .iter()
         .map(|o| o.as_ref())
         .collect::<Vec<&OsStr>>();
-    fuse::mount(fs, &mountpoint, &options).unwrap();
+
+    let (tx_quitter, rx_quitter) = channel();
+
+    ctrlc::set_handler(move || {
+        tx_quitter.send(true).unwrap();
+    })
+    .expect("Error setting Ctrl-C handler");
+
+    let _session = unsafe { fuse::spawn_mount(fs, &mountpoint, &options).unwrap() };
+
+    rx_quitter.recv().expect("Could not join quitter channel.");
 }
