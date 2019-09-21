@@ -103,10 +103,10 @@ use time::Timespec;
 const TTL: Timespec = Timespec { sec: 1, nsec: 0 };
 
 const STMT_CREATE: &str = "CREATE TABLE Files (
-    ino TEXT PRIMARY KEY,
-    parent_ino TEXT,
+    ino INTEGER PRIMARY KEY,
+    parent_ino INTEGER,
     path TEXT UNIQUE,
-    part TEXT
+    part INTEGER
     )";
 const STMT_INSERT: &str = "INSERT INTO Files (ino, parent_ino, path, part) VALUES (?, ?, ?, ?)";
 const STMT_QUERY_BY_INO: &str = "SELECT * FROM Files WHERE ino = ?";
@@ -194,10 +194,10 @@ impl From<&Row<'_>> for FileInfo {
 
 #[derive(Debug)]
 struct FileInfoRow {
-    ino: String,
-    parent_ino: String,
+    ino: i64,
+    parent_ino: i64,
     path: String,
-    part: String,
+    part: i64,
 }
 
 impl From<&Row<'_>> for FileInfoRow {
@@ -214,10 +214,10 @@ impl From<&Row<'_>> for FileInfoRow {
 impl From<FileInfoRow> for FileInfo {
     fn from(f: FileInfoRow) -> Self {
         FileInfo {
-            ino: serde_json::from_str(&f.ino).unwrap_or_default(),
-            parent_ino: serde_json::from_str(&f.parent_ino).unwrap_or_default(),
+            ino: f.ino as u64,
+            parent_ino: f.parent_ino as u64,
             path: serde_json::from_str(&f.path).unwrap_or_default(),
-            part: serde_json::from_str(&f.part).unwrap_or_default(),
+            part: f.part as u64,
         }
     }
 }
@@ -225,10 +225,10 @@ impl From<FileInfoRow> for FileInfo {
 impl From<FileInfo> for FileInfoRow {
     fn from(f: FileInfo) -> Self {
         FileInfoRow {
-            ino: serde_json::to_string(&f.ino).unwrap_or_default(),
-            parent_ino: serde_json::to_string(&f.parent_ino).unwrap_or_default(),
+            ino: f.ino as i64,
+            parent_ino: f.parent_ino as i64,
             path: serde_json::to_string(&f.path).unwrap_or_default(),
-            part: serde_json::to_string(&f.part).unwrap_or_default(),
+            part: f.part as i64,
         }
     }
 }
