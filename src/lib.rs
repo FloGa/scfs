@@ -102,6 +102,12 @@ use time::Timespec;
 
 const TTL: Timespec = Timespec { sec: 1, nsec: 0 };
 
+const STMT_CREATE: &str = "CREATE TABLE Files (
+    ino TEXT PRIMARY KEY,
+    parent_ino TEXT,
+    path TEXT UNIQUE,
+    part TEXT
+    )";
 const STMT_INSERT: &str = "INSERT INTO Files (ino, parent_ino, path, part) VALUES (?, ?, ?, ?)";
 const STMT_QUERY_BY_INO: &str = "SELECT * FROM Files WHERE ino = ?";
 const STMT_QUERY_BY_PARENT_INO: &str = "SELECT * FROM Files WHERE parent_ino = ? LIMIT -1 OFFSET ?";
@@ -299,17 +305,7 @@ impl SplitFS {
     pub fn new(mirror: OsString) -> SplitFS {
         let file_db = Connection::open_in_memory().unwrap();
 
-        file_db
-            .execute(
-                "CREATE TABLE Files (
-                ino TEXT PRIMARY KEY,
-                parent_ino TEXT,
-                path TEXT UNIQUE,
-                part TEXT
-                )",
-                NO_PARAMS,
-            )
-            .unwrap();
+        file_db.execute(STMT_CREATE, NO_PARAMS).unwrap();
 
         populate(&file_db, &mirror, 0);
 
