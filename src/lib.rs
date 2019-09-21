@@ -216,7 +216,7 @@ impl From<FileInfoRow> for FileInfo {
         FileInfo {
             ino: f.ino as u64,
             parent_ino: f.parent_ino as u64,
-            path: serde_json::from_str(&f.path).unwrap_or_default(),
+            path: OsString::from(f.path),
             part: f.part as u64,
         }
     }
@@ -227,7 +227,7 @@ impl From<FileInfo> for FileInfoRow {
         FileInfoRow {
             ino: f.ino as i64,
             parent_ino: f.parent_ino as i64,
-            path: serde_json::to_string(&f.path).unwrap_or_default(),
+            path: f.path.into_string().unwrap(),
             part: f.part as i64,
         }
     }
