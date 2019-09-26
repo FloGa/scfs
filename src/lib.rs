@@ -234,7 +234,7 @@ impl From<FileInfo> for FileInfoRow {
 }
 
 impl SplitFS {
-    pub fn new(mirror: OsString) -> SplitFS {
+    pub fn new(mirror: OsString) -> Self {
         let file_db = Connection::open_in_memory().unwrap();
 
         file_db.execute(STMT_CREATE, NO_PARAMS).unwrap();
