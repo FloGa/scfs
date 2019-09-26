@@ -304,6 +304,29 @@ impl SplitFS {
         }
     }
 
+    fn get_attr_from_file_info(&self, file_info: &FileInfo) -> FileAttr {
+        if file_info.part == 0 {
+            let mut attr =
+                convert_metadata_to_attr(fs::metadata(&file_info.path).unwrap(), file_info.ino);
+            attr.kind = FileType::Directory;
+            attr.blocks = 0;
+            attr.perm = 0o755;
+            attr
+        } else {
+            let mut attr = convert_metadata_to_attr(
+                fs::metadata(
+                    self.get_file_info_from_ino(file_info.parent_ino)
+                        .unwrap()
+                        .path,
+                )
+                .unwrap(),
+                file_info.ino,
+            );
+            attr.size = u64::min(BLOCK_SIZE, attr.size - (file_info.part - 1) * BLOCK_SIZE);
+            attr
+        }
+    }
+
     fn populate<P: AsRef<Path>>(file_db: &Connection, path: P, parent_ino: u64) {
         let path = path.as_ref();
 
@@ -382,26 +405,7 @@ impl Filesystem for SplitFS {
         let file_info =
             self.get_file_info_from_parent_ino_and_file_name(parent, OsString::from(name));
         if let Ok(file_info) = file_info {
-            let attr = if file_info.part == 0 {
-                let mut meta =
-                    convert_metadata_to_attr(fs::metadata(file_info.path).unwrap(), file_info.ino);
-                meta.kind = FileType::Directory;
-                meta.blocks = 0;
-                meta.perm = 0o755;
-                meta
-            } else {
-                let mut meta = convert_metadata_to_attr(
-                    fs::metadata(
-                        self.get_file_info_from_ino(file_info.parent_ino)
-                            .unwrap()
-                            .path,
-                    )
-                    .unwrap(),
-                    file_info.ino,
-                );
-                meta.size = u64::min(BLOCK_SIZE, meta.size - (file_info.part - 1) * BLOCK_SIZE);
-                meta
-            };
+            let attr = self.get_attr_from_file_info(&file_info);
             reply.entry(&TTL, &attr, 0);
         } else {
             reply.error(ENOENT);
@@ -411,26 +415,7 @@ impl Filesystem for SplitFS {
     fn getattr(&mut self, _req: &Request, ino: u64, reply: ReplyAttr) {
         let file_info = self.get_file_info_from_ino(ino);
         if let Ok(file_info) = file_info {
-            let attr = if file_info.part == 0 {
-                let mut meta =
-                    convert_metadata_to_attr(fs::metadata(file_info.path).unwrap(), file_info.ino);
-                meta.kind = FileType::Directory;
-                meta.blocks = 0;
-                meta.perm = 0o755;
-                meta
-            } else {
-                let mut meta = convert_metadata_to_attr(
-                    fs::metadata(
-                        self.get_file_info_from_ino(file_info.parent_ino)
-                            .unwrap()
-                            .path,
-                    )
-                    .unwrap(),
-                    file_info.ino,
-                );
-                meta.size = u64::min(BLOCK_SIZE, meta.size - (file_info.part - 1) * BLOCK_SIZE);
-                meta
-            };
+            let attr = self.get_attr_from_file_info(&file_info);
             reply.attr(&TTL, &attr)
         } else {
             reply.error(ENOENT)
