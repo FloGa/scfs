@@ -106,9 +106,11 @@ const STMT_CREATE: &str = "CREATE TABLE Files (
     ino INTEGER PRIMARY KEY,
     parent_ino INTEGER,
     path TEXT UNIQUE,
-    part INTEGER
+    part INTEGER,
+    vdir INTEGER
     )";
-const STMT_INSERT: &str = "INSERT INTO Files (ino, parent_ino, path, part) VALUES (?, ?, ?, ?)";
+const STMT_INSERT: &str =
+    "INSERT INTO Files (ino, parent_ino, path, part, vdir) VALUES (?, ?, ?, ?, ?)";
 const STMT_QUERY_BY_INO: &str = "SELECT * FROM Files WHERE ino = ?";
 const STMT_QUERY_BY_PARENT_INO: &str = "SELECT * FROM Files WHERE parent_ino = ? LIMIT -1 OFFSET ?";
 const STMT_QUERY_LAST_INO: &str = "SELECT * FROM Files ORDER BY _rowid_ DESC LIMIT 1";
@@ -164,6 +166,7 @@ struct FileInfo {
     parent_ino: u64,
     path: OsString,
     part: u64,
+    vdir: bool,
 }
 
 impl FileInfo {
@@ -173,6 +176,7 @@ impl FileInfo {
             parent_ino: Default::default(),
             path: Default::default(),
             part: 0,
+            vdir: false,
         }
     }
 
@@ -182,6 +186,7 @@ impl FileInfo {
             parent_ino,
             path: Default::default(),
             part: 0,
+            vdir: false,
         }
     }
 }
@@ -198,6 +203,7 @@ struct FileInfoRow {
     parent_ino: i64,
     path: String,
     part: i64,
+    vdir: bool,
 }
 
 impl From<&Row<'_>> for FileInfoRow {
@@ -207,6 +213,7 @@ impl From<&Row<'_>> for FileInfoRow {
             parent_ino: row.get(1).unwrap(),
             path: row.get(2).unwrap(),
             part: row.get(3).unwrap(),
+            vdir: row.get(4).unwrap(),
         }
     }
 }
@@ -218,6 +225,7 @@ impl From<FileInfoRow> for FileInfo {
             parent_ino: f.parent_ino as u64,
             path: OsString::from(f.path),
             part: f.part as u64,
+            vdir: f.vdir,
         }
     }
 }
@@ -229,6 +237,7 @@ impl From<FileInfo> for FileInfoRow {
             parent_ino: f.parent_ino as i64,
             path: f.path.into_string().unwrap(),
             part: f.part as i64,
+            vdir: f.vdir,
         }
     }
 }
@@ -319,6 +328,7 @@ impl SplitFS {
             parent_ino,
             path: OsString::from(path),
             part: 0,
+            vdir: attr.kind == FileType::RegularFile,
         });
 
         file_db
@@ -328,7 +338,8 @@ impl SplitFS {
                 file_info.ino,
                 file_info.parent_ino,
                 file_info.path,
-                file_info.part
+                file_info.part,
+                file_info.vdir
             ])
             .unwrap();
 
@@ -340,6 +351,7 @@ impl SplitFS {
                     parent_ino: attr.ino,
                     path: OsString::from(path.join(format!("scfs.{:010}", i))),
                     part: i + 1,
+                    vdir: false,
                 });
 
                 file_db
@@ -349,7 +361,8 @@ impl SplitFS {
                         file_info.ino,
                         file_info.parent_ino,
                         file_info.path,
-                        file_info.part
+                        file_info.part,
+                        file_info.vdir
                     ])
                     .unwrap();
             }
