@@ -153,6 +153,11 @@ pub struct SplitFS {
     file_handles: HashMap<u64, FileHandle>,
 }
 
+pub struct CatFS {
+    file_db: Connection,
+    file_handles: HashMap<u64, Vec<FileHandle>>,
+}
+
 struct FileHandle {
     file: BufReader<File>,
     offset: u64,
@@ -534,6 +539,315 @@ impl Filesystem for SplitFS {
                     item.ino,
                     offset + off as i64 + 1,
                     if item.part > 0 {
+                        FileType::RegularFile
+                    } else {
+                        FileType::Directory
+                    },
+                    Path::new(&item.path).file_name().unwrap(),
+                );
+            }
+            reply.ok();
+        } else {
+            reply.error(ENOENT);
+        }
+    }
+}
+
+impl CatFS {
+    pub fn new(mirror: OsString) -> Self {
+        let file_db = Connection::open_in_memory().unwrap();
+
+        file_db.execute(STMT_CREATE, NO_PARAMS).unwrap();
+
+        CatFS::populate(&file_db, &mirror, 0);
+
+        {
+            let query = "UPDATE Files SET vdir = 1
+                 WHERE ino IN (
+                    SELECT DISTINCT parent_ino FROM Files WHERE part != 0
+                )";
+            let mut stmt = file_db.prepare(query).unwrap();
+            stmt.execute(NO_PARAMS).unwrap();
+        }
+
+        let file_handles = Default::default();
+
+        CatFS {
+            file_db,
+            file_handles,
+        }
+    }
+
+    fn get_file_info_from_ino(&self, ino: u64) -> Result<FileInfo, Error> {
+        let ino = FileInfoRow::from(FileInfo::with_ino(ino)).ino;
+
+        let mut stmt = self.file_db.prepare_cached(STMT_QUERY_BY_INO).unwrap();
+
+        let file_info = stmt
+            .query_map(params![ino], |row| Ok(FileInfo::from(row)))?
+            .next()
+            .unwrap();
+        file_info
+    }
+
+    fn get_files_info_from_parent_ino(&self, parent_ino: u64) -> Vec<FileInfo> {
+        let parent_ino = FileInfoRow::from(FileInfo::with_parent_ino(parent_ino)).parent_ino;
+
+        let mut stmt = self
+            .file_db
+            .prepare_cached(STMT_QUERY_BY_PARENT_INO)
+            .unwrap();
+
+        stmt.query_map(params![parent_ino, 0], |row| Ok(FileInfo::from(row)))
+            .unwrap()
+            .map(|res| res.unwrap())
+            .collect()
+    }
+
+    fn get_file_info_from_parent_ino_and_file_name(
+        &self,
+        parent_ino: u64,
+        file_name: OsString,
+    ) -> Result<FileInfo, Error> {
+        let parent_ino = FileInfoRow::from(FileInfo::with_parent_ino(parent_ino)).parent_ino;
+
+        let mut stmt = self
+            .file_db
+            .prepare_cached(STMT_QUERY_BY_PARENT_INO)
+            .unwrap();
+
+        let inos = stmt
+            .query_map(params![parent_ino, 0], |row| Ok(FileInfo::from(row).ino))
+            .unwrap();
+
+        let file_info = inos
+            .map(|ino| {
+                let ino = ino.unwrap();
+                self.get_file_info_from_ino(ino).unwrap()
+            })
+            .skip_while(|file_info| {
+                let name_from_db = Path::new(&file_info.path).file_name().unwrap();
+                let name_to_look_for = Path::new(&file_name).file_name().unwrap();
+                name_from_db != name_to_look_for
+            })
+            .next();
+
+        match file_info {
+            Some(f) => Ok(f),
+            None => Err(Error::QueryReturnedNoRows),
+        }
+    }
+
+    fn get_attr_from_file_info(&self, file_info: &FileInfo) -> FileAttr {
+        if file_info.vdir {
+            let parts = self.get_files_info_from_parent_ino(file_info.ino);
+            let attrs = parts
+                .iter()
+                .map(|info| convert_metadata_to_attr(fs::metadata(&info.path).unwrap(), info.ino))
+                .collect::<Vec<_>>();
+            let mut attr = attrs.get(0).unwrap().clone();
+            attr.ino = file_info.ino;
+            attr.blocks = attrs.iter().map(|attr| attr.blocks).sum();
+            attr.size = attrs.iter().map(|attr| attr.size).sum();
+            attr
+        } else {
+            let attr =
+                convert_metadata_to_attr(fs::metadata(&file_info.path).unwrap(), file_info.ino);
+            attr
+        }
+    }
+
+    fn populate<P: AsRef<Path>>(file_db: &Connection, path: P, parent_ino: u64) {
+        let path = path.as_ref();
+
+        let ino = if parent_ino == 0 {
+            1
+        } else {
+            file_db
+                .prepare_cached(STMT_QUERY_LAST_INO)
+                .unwrap()
+                .query_map(NO_PARAMS, |row| Ok(FileInfo::from(row).ino))
+                .unwrap()
+                .next()
+                .unwrap()
+                .unwrap()
+                + 1
+        };
+
+        let file_info = FileInfoRow::from(FileInfo {
+            ino,
+            parent_ino,
+            path: OsString::from(path),
+            part: if path.is_file() {
+                path.file_name().unwrap().to_str().unwrap()[5..]
+                    .parse::<u64>()
+                    .unwrap()
+                    + 1
+            } else {
+                0
+            },
+            vdir: false,
+        });
+
+        file_db
+            .prepare_cached(STMT_INSERT)
+            .unwrap()
+            .execute(params![
+                file_info.ino,
+                file_info.parent_ino,
+                file_info.path,
+                file_info.part,
+                file_info.vdir
+            ])
+            .unwrap();
+
+        if path.is_dir() {
+            for entry in fs::read_dir(path).unwrap() {
+                let entry = entry.unwrap();
+                CatFS::populate(&file_db, entry.path(), ino);
+            }
+        }
+    }
+}
+
+impl Filesystem for CatFS {
+    fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
+        let file_info =
+            self.get_file_info_from_parent_ino_and_file_name(parent, OsString::from(name));
+        if let Ok(file_info) = file_info {
+            let attr = self.get_attr_from_file_info(&file_info);
+            reply.entry(&TTL, &attr, 0);
+        } else {
+            reply.error(ENOENT);
+        }
+    }
+
+    fn getattr(&mut self, _req: &Request, ino: u64, reply: ReplyAttr) {
+        let file_info = self.get_file_info_from_ino(ino);
+        if let Ok(file_info) = file_info {
+            let attr = self.get_attr_from_file_info(&file_info);
+            reply.attr(&TTL, &attr)
+        } else {
+            reply.error(ENOENT)
+        }
+    }
+
+    fn open(&mut self, _req: &Request, ino: u64, _flags: u32, reply: ReplyOpen) {
+        let files = self.get_files_info_from_parent_ino(ino);
+
+        let fhs = files
+            .iter()
+            .map(|file| FileHandle {
+                file: BufReader::new(File::open(&file.path).unwrap()),
+                offset: 0,
+                start: 0,
+                end: 0,
+            })
+            .collect();
+
+        let fh = self.file_handles.keys().last().unwrap_or(&0).clone() + 1;
+        self.file_handles.insert(fh, fhs);
+        reply.opened(fh, 0);
+    }
+
+    fn read(
+        &mut self,
+        _req: &Request,
+        ino: u64,
+        fh: u64,
+        offset: i64,
+        size: u32,
+        reply: ReplyData,
+    ) {
+        let offset = offset as usize;
+        let size = size as usize;
+
+        let file_size = self
+            .get_attr_from_file_info(&self.get_file_info_from_ino(ino).unwrap())
+            .size as usize;
+
+        let offset = offset.min(file_size);
+        let size = size.min(file_size - offset);
+
+        let part_start = offset / BLOCK_SIZE as usize;
+        let part_end = (offset + size) / BLOCK_SIZE as usize;
+
+        let handles = self.file_handles.get_mut(&fh).unwrap();
+
+        let bytes = (part_start..=part_end)
+            .map(|part| {
+                let handle = handles.get_mut(part).unwrap();
+
+                if part == part_start {
+                    handle
+                        .file
+                        .seek(SeekFrom::Start(offset as u64 % BLOCK_SIZE))
+                        .unwrap();
+                } else {
+                    handle.file.seek(SeekFrom::Start(0)).unwrap();
+                }
+
+                let bytes = handle.file.borrow_mut().bytes().map(|b| b.unwrap());
+
+                bytes
+                    .take(if part == part_end {
+                        (if part_start == part_end { 0 } else { offset } + size)
+                            % BLOCK_SIZE as usize
+                    } else {
+                        BLOCK_SIZE as usize
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .flatten()
+            .collect::<Vec<_>>();
+
+        reply.data(&bytes)
+    }
+
+    fn release(
+        &mut self,
+        _req: &Request,
+        _ino: u64,
+        fh: u64,
+        _flags: u32,
+        _lock_owner: u64,
+        _flush: bool,
+        reply: ReplyEmpty,
+    ) {
+        self.file_handles.remove(&fh);
+        reply.ok();
+    }
+
+    fn readdir(
+        &mut self,
+        _req: &Request,
+        ino: u64,
+        _fh: u64,
+        offset: i64,
+        mut reply: ReplyDirectory,
+    ) {
+        let file_info = self.get_file_info_from_ino(ino);
+
+        if let Ok(file_info) = file_info {
+            let mut stmt = self
+                .file_db
+                .prepare_cached(STMT_QUERY_BY_PARENT_INO)
+                .unwrap();
+            let items = stmt
+                .query_map(
+                    params![
+                        FileInfoRow::from(FileInfo::with_parent_ino(file_info.ino)).parent_ino,
+                        offset
+                    ],
+                    |row| Ok(FileInfo::from(row)),
+                )
+                .unwrap();
+            for (off, item) in items.enumerate() {
+                let item = item.unwrap();
+                reply.add(
+                    item.ino,
+                    offset + off as i64 + 1,
+                    if item.vdir {
                         FileType::RegularFile
                     } else {
                         FileType::Directory
