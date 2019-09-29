@@ -438,7 +438,7 @@ impl Filesystem for SplitFS {
             let start = (file_info.part - 1) * BLOCK_SIZE;
             let end = start + BLOCK_SIZE;
             file.seek(SeekFrom::Start(start)).unwrap();
-            let fh = self.file_handles.keys().last().unwrap_or(&0).clone() + 1;
+            let fh = time::precise_time_ns();
             self.file_handles.insert(
                 fh,
                 FileHandle {
