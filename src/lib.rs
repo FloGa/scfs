@@ -100,7 +100,10 @@ use libc::ENOENT;
 use rusqlite::{params, Connection, Error, Row, NO_PARAMS};
 use time::Timespec;
 
-const TTL: Timespec = Timespec { sec: 1, nsec: 0 };
+const TTL: Timespec = Timespec {
+    sec: 60 * 60 * 24,
+    nsec: 0,
+};
 
 const STMT_CREATE: &str = "CREATE TABLE Files (
     ino INTEGER PRIMARY KEY,
