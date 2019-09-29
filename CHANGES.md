@@ -1,3 +1,5 @@
+# Changes since latest release
+
 # Changes in 0.4.0
 
 ## Breaking changes
