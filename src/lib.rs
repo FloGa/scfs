@@ -117,7 +117,10 @@ use libc::ENOENT;
 use rusqlite::{params, Connection, Error, Row, NO_PARAMS};
 use time::Timespec;
 
-const TTL: Timespec = Timespec { sec: 1, nsec: 0 };
+const TTL: Timespec = Timespec {
+    sec: 60 * 60 * 24,
+    nsec: 0,
+};
 
 const STMT_CREATE: &str = "CREATE TABLE Files (
     ino INTEGER PRIMARY KEY,
@@ -177,7 +180,6 @@ pub struct CatFS {
 
 struct FileHandle {
     file: BufReader<File>,
-    offset: u64,
     start: u64,
     end: u64,
 }
@@ -454,20 +456,12 @@ impl Filesystem for SplitFS {
             )
             .unwrap();
             let mut file = BufReader::new(file);
-            let offset = 0;
             let start = (file_info.part - 1) * BLOCK_SIZE;
             let end = start + BLOCK_SIZE;
             file.seek(SeekFrom::Start(start)).unwrap();
-            let fh = self.file_handles.keys().last().unwrap_or(&0).clone() + 1;
-            self.file_handles.insert(
-                fh,
-                FileHandle {
-                    file,
-                    offset,
-                    start,
-                    end,
-                },
-            );
+            let fh = time::precise_time_ns();
+            self.file_handles
+                .insert(fh, FileHandle { file, start, end });
             reply.opened(fh, 0);
         } else {
             reply.error(ENOENT)
@@ -491,13 +485,10 @@ impl Filesystem for SplitFS {
         let offset = offset.min(handle.end - handle.start);
         let size = size.min(handle.end - handle.start - offset);
 
-        if offset != handle.offset {
-            handle
-                .file
-                .seek(SeekFrom::Start(handle.start + offset))
-                .unwrap();
-            handle.offset = offset;
-        }
+        handle
+            .file
+            .seek(SeekFrom::Start(handle.start + offset))
+            .unwrap();
 
         reply.data(
             &handle
@@ -508,8 +499,6 @@ impl Filesystem for SplitFS {
                 .map(|b| b.unwrap())
                 .collect::<Vec<_>>(),
         );
-
-        handle.offset += size;
     }
 
     fn release(
@@ -756,7 +745,6 @@ impl Filesystem for CatFS {
             .iter()
             .map(|file| FileHandle {
                 file: BufReader::new(File::open(&file.path).unwrap()),
-                offset: 0,
                 start: 0,
                 end: 0,
             })
