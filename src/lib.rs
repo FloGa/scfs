@@ -114,6 +114,7 @@ use fuse::{
 };
 use libc::ENOENT;
 use rusqlite::{params, Connection, Error, Row, NO_PARAMS};
+use threadpool::ThreadPool;
 use time::Timespec;
 
 const TTL: Timespec = Timespec {
@@ -170,11 +171,13 @@ fn convert_metadata_to_attr(meta: Metadata, ino: u64) -> FileAttr {
 pub struct SplitFS {
     file_db: Connection,
     file_handles: HashMap<u64, FileHandle>,
+    threadpool: ThreadPool,
 }
 
 pub struct CatFS {
     file_db: Connection,
     file_handles: HashMap<u64, Vec<FileHandle>>,
+    threadpool: ThreadPool,
 }
 
 struct FileHandle {
@@ -275,9 +278,12 @@ impl SplitFS {
 
         let file_handles = Default::default();
 
+        let threadpool = Default::default();
+
         SplitFS {
             file_db,
             file_handles,
+            threadpool,
         }
     }
 
@@ -575,9 +581,12 @@ impl CatFS {
 
         let file_handles = Default::default();
 
+        let threadpool = Default::default();
+
         CatFS {
             file_db,
             file_handles,
+            threadpool,
         }
     }
 
