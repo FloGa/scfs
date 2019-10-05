@@ -491,6 +491,7 @@ impl Filesystem for SplitFS {
         let size = size.min(handle.end - handle.start - offset);
         let start = handle.start;
 
+        self.threadpool.execute(move || {
         let mut file = BufReader::new(File::open(file).unwrap());
 
         file.seek(SeekFrom::Start(start + offset)).unwrap();
@@ -502,6 +503,7 @@ impl Filesystem for SplitFS {
             .collect::<Vec<_>>();
 
         reply.data(&bytes);
+        });
     }
 
     fn release(
@@ -795,6 +797,7 @@ impl Filesystem for CatFS {
             })
             .collect::<Vec<_>>();
 
+        self.threadpool.execute(move || {
         let part_start = 0;
         let part_end = files.len() - 1;
 
@@ -826,6 +829,7 @@ impl Filesystem for CatFS {
             .collect::<Vec<_>>();
 
         reply.data(&bytes);
+        });
     }
 
     fn release(
