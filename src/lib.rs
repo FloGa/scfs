@@ -492,17 +492,17 @@ impl Filesystem for SplitFS {
         let start = handle.start;
 
         self.threadpool.execute(move || {
-        let mut file = BufReader::new(File::open(file).unwrap());
+            let mut file = BufReader::new(File::open(file).unwrap());
 
-        file.seek(SeekFrom::Start(start + offset)).unwrap();
+            file.seek(SeekFrom::Start(start + offset)).unwrap();
 
-        let bytes = file
-            .take(size)
-            .bytes()
-            .map(|b| b.unwrap())
-            .collect::<Vec<_>>();
+            let bytes = file
+                .take(size)
+                .bytes()
+                .map(|b| b.unwrap())
+                .collect::<Vec<_>>();
 
-        reply.data(&bytes);
+            reply.data(&bytes);
         });
     }
 
@@ -798,37 +798,37 @@ impl Filesystem for CatFS {
             .collect::<Vec<_>>();
 
         self.threadpool.execute(move || {
-        let part_start = 0;
-        let part_end = files.len() - 1;
+            let part_start = 0;
+            let part_end = files.len() - 1;
 
-        let bytes = files
-            .iter()
-            .enumerate()
-            .map(|(part, file)| {
-                let mut file = BufReader::new(File::open(file).unwrap());
+            let bytes = files
+                .iter()
+                .enumerate()
+                .map(|(part, file)| {
+                    let mut file = BufReader::new(File::open(file).unwrap());
 
-                if part == part_start {
-                    file.seek(SeekFrom::Start(offset as u64 % BLOCK_SIZE))
-                        .unwrap();
-                } else {
-                    file.seek(SeekFrom::Start(0)).unwrap();
-                }
-
-                let bytes = file.bytes().map(|b| b.unwrap());
-
-                bytes
-                    .take(if part == part_end {
-                        (if part_start == part_end { 0 } else { offset } + size)
-                            % BLOCK_SIZE as usize
+                    if part == part_start {
+                        file.seek(SeekFrom::Start(offset as u64 % BLOCK_SIZE))
+                            .unwrap();
                     } else {
-                        BLOCK_SIZE as usize
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .flatten()
-            .collect::<Vec<_>>();
+                        file.seek(SeekFrom::Start(0)).unwrap();
+                    }
 
-        reply.data(&bytes);
+                    let bytes = file.bytes().map(|b| b.unwrap());
+
+                    bytes
+                        .take(if part == part_end {
+                            (if part_start == part_end { 0 } else { offset } + size)
+                                % BLOCK_SIZE as usize
+                        } else {
+                            BLOCK_SIZE as usize
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .flatten()
+                .collect::<Vec<_>>();
+
+            reply.data(&bytes);
         });
     }
 
