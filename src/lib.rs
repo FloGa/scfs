@@ -133,7 +133,6 @@ const STMT_INSERT: &str =
     "INSERT INTO Files (ino, parent_ino, path, part, vdir) VALUES (?, ?, ?, ?, ?)";
 const STMT_QUERY_BY_INO: &str = "SELECT * FROM Files WHERE ino = ?";
 const STMT_QUERY_BY_PARENT_INO: &str = "SELECT * FROM Files WHERE parent_ino = ? LIMIT -1 OFFSET ?";
-const STMT_QUERY_LAST_INO: &str = "SELECT * FROM Files ORDER BY _rowid_ DESC LIMIT 1";
 
 const BLOCK_SIZE: u64 = 2 * 1024 * 1024;
 
@@ -364,15 +363,7 @@ impl SplitFS {
         attr.ino = if parent_ino == 0 {
             1
         } else {
-            file_db
-                .prepare_cached(STMT_QUERY_LAST_INO)
-                .unwrap()
-                .query_map(NO_PARAMS, |row| Ok(FileInfo::from(row).ino))
-                .unwrap()
-                .next()
-                .unwrap()
-                .unwrap()
-                + 1
+            time::precise_time_ns()
         };
 
         let file_info = FileInfoRow::from(FileInfo {
@@ -718,15 +709,7 @@ impl CatFS {
         let ino = if parent_ino == 0 {
             1
         } else {
-            file_db
-                .prepare_cached(STMT_QUERY_LAST_INO)
-                .unwrap()
-                .query_map(NO_PARAMS, |row| Ok(FileInfo::from(row).ino))
-                .unwrap()
-                .next()
-                .unwrap()
-                .unwrap()
-                + 1
+            time::precise_time_ns()
         };
 
         let file_info = FileInfoRow::from(FileInfo {
