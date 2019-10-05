@@ -531,6 +531,22 @@ impl Filesystem for SplitFS {
         let file_info = self.get_file_info_from_ino(ino);
 
         if let Ok(file_info) = file_info {
+            if offset < 2 {
+                if offset == 0 {
+                    reply.add(file_info.ino, 1, FileType::Directory, ".");
+                }
+                reply.add(
+                    if file_info.parent_ino == 0 {
+                        file_info.ino
+                    } else {
+                        file_info.parent_ino
+                    },
+                    2,
+                    FileType::Directory,
+                    "..",
+                );
+            }
+
             let mut stmt = self
                 .file_db
                 .prepare_cached(STMT_QUERY_BY_PARENT_INO)
@@ -539,16 +555,41 @@ impl Filesystem for SplitFS {
                 .query_map(
                     params![
                         FileInfoRow::from(FileInfo::with_parent_ino(file_info.ino)).parent_ino,
-                        offset
+                        // The offset includes . and .., both which are not included in the
+                        // database, so the SELECT offset must be adjusted. Since the offset could
+                        // be negative, set it to 0 in that case.
+                        0.max(offset - 2)
                     ],
                     |row| Ok(FileInfo::from(row)),
                 )
                 .unwrap();
             for (off, item) in items.enumerate() {
                 let item = item.unwrap();
+
+                // Here the item is added to the directory listing. It is important to note that
+                // the offset parameter is quite crucial for correct function. The offset parameter
+                // is used for succeeding calls to start with the next item after the last item
+                // from the previous call. So, the offset parameter has to be one more than the
+                // index of the current item. Furthermore, since "." and ".." have been added
+                // manually as to not pollute the database with them, they also have to be handled
+                // properly. They always get inserted in positions 0 and 1 respectively. If the
+                // call starts at offset 0, then both of the directory hardlinks are included and
+                // the offset must be increased by 2. If the starting offset is 1, then only "."
+                // has been already added. For the additional "..", the offset has to be increased
+                // by 1. If the offset is greater than 1, then the hardlinks have been taken care
+                // of and the offset is already correct.
                 reply.add(
                     item.ino,
-                    offset + off as i64 + 1,
+                    offset
+                        + if offset == 0 {
+                            2
+                        } else if offset == 1 {
+                            1
+                        } else {
+                            0
+                        }
+                        + off as i64
+                        + 1,
                     if item.part > 0 {
                         FileType::RegularFile
                     } else {
@@ -857,6 +898,22 @@ impl Filesystem for CatFS {
         let file_info = self.get_file_info_from_ino(ino);
 
         if let Ok(file_info) = file_info {
+            if offset < 2 {
+                if offset == 0 {
+                    reply.add(file_info.ino, 1, FileType::Directory, ".");
+                }
+                reply.add(
+                    if file_info.parent_ino == 0 {
+                        file_info.ino
+                    } else {
+                        file_info.parent_ino
+                    },
+                    2,
+                    FileType::Directory,
+                    "..",
+                );
+            }
+
             let mut stmt = self
                 .file_db
                 .prepare_cached(STMT_QUERY_BY_PARENT_INO)
@@ -865,16 +922,41 @@ impl Filesystem for CatFS {
                 .query_map(
                     params![
                         FileInfoRow::from(FileInfo::with_parent_ino(file_info.ino)).parent_ino,
-                        offset
+                        // The offset includes . and .., both which are not included in the
+                        // database, so the SELECT offset must be adjusted. Since the offset could
+                        // be negative, set it to 0 in that case.
+                        0.max(offset - 2)
                     ],
                     |row| Ok(FileInfo::from(row)),
                 )
                 .unwrap();
             for (off, item) in items.enumerate() {
                 let item = item.unwrap();
+
+                // Here the item is added to the directory listing. It is important to note that
+                // the offset parameter is quite crucial for correct function. The offset parameter
+                // is used for succeeding calls to start with the next item after the last item
+                // from the previous call. So, the offset parameter has to be one more than the
+                // index of the current item. Furthermore, since "." and ".." have been added
+                // manually as to not pollute the database with them, they also have to be handled
+                // properly. They always get inserted in positions 0 and 1 respectively. If the
+                // call starts at offset 0, then both of the directory hardlinks are included and
+                // the offset must be increased by 2. If the starting offset is 1, then only "."
+                // has been already added. For the additional "..", the offset has to be increased
+                // by 1. If the offset is greater than 1, then the hardlinks have been taken care
+                // of and the offset is already correct.
                 reply.add(
                     item.ino,
-                    offset + off as i64 + 1,
+                    offset
+                        + if offset == 0 {
+                            2
+                        } else if offset == 1 {
+                            1
+                        } else {
+                            0
+                        }
+                        + off as i64
+                        + 1,
                     if item.vdir {
                         FileType::RegularFile
                     } else {
