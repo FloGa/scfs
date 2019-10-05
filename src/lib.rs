@@ -750,7 +750,7 @@ impl Filesystem for CatFS {
             })
             .collect();
 
-        let fh = self.file_handles.keys().last().unwrap_or(&0).clone() + 1;
+        let fh = time::precise_time_ns();
         self.file_handles.insert(fh, fhs);
         reply.opened(fh, 0);
     }
