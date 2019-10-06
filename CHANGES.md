@@ -1,3 +1,34 @@
+# Changes in 0.5.0
+
+-   Use timestamp as filehandle key
+    
+    This is an addition to commit 9468cdd884c631e450d6fdaa506e59f1bd2a77e3.
+    The described race condition is now also fixed in CatFS.
+
+-   Add threadpool as dependency
+
+-   Cache filenames instead of file handles
+    
+    By opening the files only when actually called I can avoid race
+    conditions that would arise if multiple threads access the same file
+    handle.
+
+-   Read files in separate thread
+    
+    This way, the filesystem is no longer blocked until each portion of a
+    file has been read. This also ensures that the kernel may decide to read
+    portions of a file in parallel.
+
+-   Include . and .. in directory listing
+
+-   Use timestamp as inode numbers
+    
+    This way I can save the quite expensive calls to the database for each
+    new inode number and hence decreasing the time needed for the initial
+    population of the database.
+
+-   Split lib into module files
+
 # Changes in 0.4.0
 
 ## Breaking changes
