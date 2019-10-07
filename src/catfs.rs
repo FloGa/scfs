@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};
-use std::fs;
 use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
+use std::{fs, thread};
 
 use fuse::{
     FileAttr, FileType, Filesystem, ReplyAttr, ReplyData, ReplyDirectory, ReplyEmpty, ReplyEntry,
@@ -11,7 +11,6 @@ use fuse::{
 };
 use libc::ENOENT;
 use rusqlite::{params, Connection, Error, NO_PARAMS};
-use threadpool::ThreadPool;
 
 use crate::{
     convert_metadata_to_attr, FileHandle, FileInfo, FileInfoRow, BLOCK_SIZE, STMT_CREATE,
@@ -21,7 +20,6 @@ use crate::{
 pub struct CatFS {
     file_db: Connection,
     file_handles: HashMap<u64, Vec<FileHandle>>,
-    threadpool: ThreadPool,
 }
 
 impl CatFS {
@@ -43,12 +41,9 @@ impl CatFS {
 
         let file_handles = Default::default();
 
-        let threadpool = Default::default();
-
         CatFS {
             file_db,
             file_handles,
-            threadpool,
         }
     }
 
@@ -249,7 +244,7 @@ impl Filesystem for CatFS {
             })
             .collect::<Vec<_>>();
 
-        self.threadpool.execute(move || {
+        thread::spawn(move || {
             let part_start = 0;
             let part_end = files.len() - 1;
 

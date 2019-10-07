@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};
-use std::fs;
 use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
+use std::{fs, thread};
 
 use fuse::{
     FileAttr, FileType, Filesystem, ReplyAttr, ReplyData, ReplyDirectory, ReplyEmpty, ReplyEntry,
@@ -11,7 +11,6 @@ use fuse::{
 };
 use libc::ENOENT;
 use rusqlite::{params, Connection, Error, NO_PARAMS};
-use threadpool::ThreadPool;
 
 use crate::{
     convert_metadata_to_attr, FileHandle, FileInfo, FileInfoRow, BLOCK_SIZE, STMT_CREATE,
@@ -21,7 +20,6 @@ use crate::{
 pub struct SplitFS {
     file_db: Connection,
     file_handles: HashMap<u64, FileHandle>,
-    threadpool: ThreadPool,
 }
 
 impl SplitFS {
@@ -34,12 +32,9 @@ impl SplitFS {
 
         let file_handles = Default::default();
 
-        let threadpool = Default::default();
-
         SplitFS {
             file_db,
             file_handles,
-            threadpool,
         }
     }
 
@@ -239,7 +234,7 @@ impl Filesystem for SplitFS {
         let size = size.min(handle.end - handle.start - offset);
         let start = handle.start;
 
-        self.threadpool.execute(move || {
+        thread::spawn(move || {
             let mut file = BufReader::new(File::open(file).unwrap());
 
             file.seek(SeekFrom::Start(start + offset)).unwrap();
