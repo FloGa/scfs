@@ -281,10 +281,12 @@ impl Filesystem for SplitFS {
 
             let mut additional_offset = 0;
             if offset < 2 {
-                if offset == 0 {
+                if offset < 1 {
                     reply.add(file_info.ino, 1, FileType::Directory, ".");
                     additional_offset += 1;
                 }
+
+                if offset < 2 {
                 reply.add(
                     if file_info.parent_ino == INO_OUTSIDE {
                         file_info.ino
@@ -296,6 +298,7 @@ impl Filesystem for SplitFS {
                     "..",
                 );
                 additional_offset += 1;
+                }
             }
 
             let mut stmt = self
