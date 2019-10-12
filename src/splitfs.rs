@@ -276,9 +276,14 @@ impl Filesystem for SplitFS {
         let file_info = self.get_file_info_from_ino(ino);
 
         if let Ok(file_info) = file_info {
+            // . and .. make 2
+            let additional_offset_max = 2;
+
+            let mut additional_offset = 0;
             if offset < 2 {
                 if offset == 0 {
                     reply.add(file_info.ino, 1, FileType::Directory, ".");
+                    additional_offset += 1;
                 }
                 reply.add(
                     if file_info.parent_ino == INO_OUTSIDE {
@@ -290,6 +295,7 @@ impl Filesystem for SplitFS {
                     FileType::Directory,
                     "..",
                 );
+                additional_offset += 1;
             }
 
             let mut stmt = self
@@ -303,7 +309,7 @@ impl Filesystem for SplitFS {
                         // The offset includes . and .., both which are not included in the
                         // database, so the SELECT offset must be adjusted. Since the offset could
                         // be negative, set it to 0 in that case.
-                        0.max(offset - 2)
+                        0.max(offset - additional_offset_max)
                     ],
                     |row| Ok(FileInfo::from(row)),
                 )
@@ -325,16 +331,7 @@ impl Filesystem for SplitFS {
                 // of and the offset is already correct.
                 reply.add(
                     item.ino,
-                    offset
-                        + if offset == 0 {
-                            2
-                        } else if offset == 1 {
-                            1
-                        } else {
-                            0
-                        }
-                        + off as i64
-                        + 1,
+                    offset + additional_offset + off as i64 + 1,
                     if item.part > 0 {
                         FileType::RegularFile
                     } else {
