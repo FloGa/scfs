@@ -112,7 +112,9 @@ impl CatFS {
             let parts = self.get_files_info_from_parent_ino(file_info.ino);
             let attrs = parts
                 .iter()
-                .map(|info| convert_metadata_to_attr(fs::metadata(&info.path).unwrap(), info.ino))
+                .map(|info| {
+                    convert_metadata_to_attr(fs::metadata(&info.path).unwrap(), Some(info.ino))
+                })
                 .collect::<Vec<_>>();
             let mut attr = attrs.get(0).unwrap().clone();
             attr.ino = file_info.ino;
@@ -120,8 +122,10 @@ impl CatFS {
             attr.size = attrs.iter().map(|attr| attr.size).sum();
             attr
         } else {
-            let attr =
-                convert_metadata_to_attr(fs::metadata(&file_info.path).unwrap(), file_info.ino);
+            let attr = convert_metadata_to_attr(
+                fs::metadata(&file_info.path).unwrap(),
+                Some(file_info.ino),
+            );
             attr
         }
     }

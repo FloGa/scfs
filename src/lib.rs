@@ -146,9 +146,13 @@ fn convert_filetype(ft: fs::FileType) -> FileType {
     }
 }
 
-fn convert_metadata_to_attr(meta: Metadata, ino: u64) -> FileAttr {
+fn convert_metadata_to_attr(meta: Metadata, ino: Option<u64>) -> FileAttr {
     FileAttr {
-        ino: if ino != 0 { ino } else { meta.st_ino() },
+        ino: if let Some(ino) = ino {
+            ino
+        } else {
+            meta.st_ino()
+        },
         size: meta.st_size(),
         blocks: meta.st_blocks(),
         atime: Timespec::new(meta.st_atime(), meta.st_atime_nsec() as i32),
