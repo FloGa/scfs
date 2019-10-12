@@ -13,8 +13,8 @@ use libc::ENOENT;
 use rusqlite::{params, Connection, Error, NO_PARAMS};
 
 use crate::{
-    convert_metadata_to_attr, FileHandle, FileInfo, FileInfoRow, BLOCK_SIZE, STMT_CREATE,
-    STMT_INSERT, STMT_QUERY_BY_INO, STMT_QUERY_BY_PARENT_INO, TTL,
+    convert_metadata_to_attr, FileHandle, FileInfo, FileInfoRow, BLOCK_SIZE, INO_OUTSIDE, INO_ROOT,
+    STMT_CREATE, STMT_INSERT, STMT_QUERY_BY_INO, STMT_QUERY_BY_PARENT_INO, TTL,
 };
 
 pub struct SplitFS {
@@ -28,7 +28,7 @@ impl SplitFS {
 
         file_db.execute(STMT_CREATE, NO_PARAMS).unwrap();
 
-        SplitFS::populate(&file_db, &mirror, 0);
+        SplitFS::populate(&file_db, &mirror, INO_OUTSIDE);
 
         let file_handles = Default::default();
 
@@ -114,8 +114,8 @@ impl SplitFS {
 
         let mut attr = convert_metadata_to_attr(path.metadata().unwrap(), None);
 
-        attr.ino = if parent_ino == 0 {
-            1
+        attr.ino = if parent_ino == INO_OUTSIDE {
+            INO_ROOT
         } else {
             time::precise_time_ns()
         };
@@ -281,7 +281,7 @@ impl Filesystem for SplitFS {
                     reply.add(file_info.ino, 1, FileType::Directory, ".");
                 }
                 reply.add(
-                    if file_info.parent_ino == 0 {
+                    if file_info.parent_ino == INO_OUTSIDE {
                         file_info.ino
                     } else {
                         file_info.parent_ino

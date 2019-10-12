@@ -13,8 +13,8 @@ use libc::ENOENT;
 use rusqlite::{params, Connection, Error, NO_PARAMS};
 
 use crate::{
-    convert_metadata_to_attr, FileHandle, FileInfo, FileInfoRow, BLOCK_SIZE, STMT_CREATE,
-    STMT_INSERT, STMT_QUERY_BY_INO, STMT_QUERY_BY_PARENT_INO, TTL,
+    convert_metadata_to_attr, FileHandle, FileInfo, FileInfoRow, BLOCK_SIZE, INO_OUTSIDE, INO_ROOT,
+    STMT_CREATE, STMT_INSERT, STMT_QUERY_BY_INO, STMT_QUERY_BY_PARENT_INO, TTL,
 };
 
 pub struct CatFS {
@@ -28,7 +28,7 @@ impl CatFS {
 
         file_db.execute(STMT_CREATE, NO_PARAMS).unwrap();
 
-        CatFS::populate(&file_db, &mirror, 0);
+        CatFS::populate(&file_db, &mirror, INO_OUTSIDE);
 
         {
             let query = "UPDATE Files SET vdir = 1
@@ -133,8 +133,8 @@ impl CatFS {
     fn populate<P: AsRef<Path>>(file_db: &Connection, path: P, parent_ino: u64) {
         let path = path.as_ref();
 
-        let ino = if parent_ino == 0 {
-            1
+        let ino = if parent_ino == INO_OUTSIDE {
+            INO_ROOT
         } else {
             time::precise_time_ns()
         };
@@ -313,7 +313,7 @@ impl Filesystem for CatFS {
                     reply.add(file_info.ino, 1, FileType::Directory, ".");
                 }
                 reply.add(
-                    if file_info.parent_ino == 0 {
+                    if file_info.parent_ino == INO_OUTSIDE {
                         file_info.ino
                     } else {
                         file_info.parent_ino
