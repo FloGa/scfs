@@ -287,17 +287,17 @@ impl Filesystem for SplitFS {
                 }
 
                 if offset < 2 {
-                reply.add(
-                    if file_info.parent_ino == INO_OUTSIDE {
-                        file_info.ino
-                    } else {
-                        file_info.parent_ino
-                    },
-                    2,
-                    FileType::Directory,
-                    "..",
-                );
-                additional_offset += 1;
+                    reply.add(
+                        if file_info.parent_ino == INO_OUTSIDE {
+                            file_info.ino
+                        } else {
+                            file_info.parent_ino
+                        },
+                        2,
+                        FileType::Directory,
+                        "..",
+                    );
+                    additional_offset += 1;
                 }
             }
 
