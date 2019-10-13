@@ -107,6 +107,7 @@ use std::os::linux::fs::MetadataExt;
 
 use fuse::{FileAttr, FileType};
 use rusqlite::Row;
+use serde::{Deserialize, Serialize};
 use time::Timespec;
 
 pub use catfs::CatFS;
@@ -133,6 +134,12 @@ const STMT_QUERY_BY_INO: &str = "SELECT * FROM Files WHERE ino = ?";
 const STMT_QUERY_BY_PARENT_INO: &str = "SELECT * FROM Files WHERE parent_ino = ? LIMIT -1 OFFSET ?";
 
 const BLOCK_SIZE: u64 = 2 * 1024 * 1024;
+
+const CONFIG_FILE_NAME: &str = ".scfs_config";
+
+const INO_OUTSIDE: u64 = 0;
+const INO_ROOT: u64 = 1;
+const INO_CONFIG: u64 = 2;
 
 fn convert_filetype(ft: fs::FileType) -> FileType {
     if ft.is_dir() {
@@ -256,3 +263,6 @@ impl From<FileInfo> for FileInfoRow {
         }
     }
 }
+
+#[derive(Serialize, Deserialize, Debug)]
+struct Config {}
