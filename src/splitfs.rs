@@ -13,8 +13,9 @@ use libc::ENOENT;
 use rusqlite::{params, Connection, Error, NO_PARAMS};
 
 use crate::{
-    convert_metadata_to_attr, Config, FileHandle, FileInfo, FileInfoRow, BLOCK_SIZE, INO_OUTSIDE, INO_ROOT,
-    STMT_CREATE, STMT_INSERT, STMT_QUERY_BY_INO, STMT_QUERY_BY_PARENT_INO, TTL,
+    convert_metadata_to_attr, Config, FileHandle, FileInfo, FileInfoRow, BLOCK_SIZE,
+    CONFIG_FILE_NAME, INO_CONFIG, INO_OUTSIDE, INO_ROOT, STMT_CREATE, STMT_INSERT,
+    STMT_QUERY_BY_INO, STMT_QUERY_BY_PARENT_INO, TTL,
 };
 
 pub struct SplitFS {
@@ -116,6 +117,16 @@ impl SplitFS {
         }
     }
 
+    fn get_config_attr(&self) -> FileAttr {
+        let file_info = self.get_file_info_from_ino(INO_ROOT).unwrap();
+        let mut attr = self.get_attr_from_file_info(&file_info);
+        attr.ino = INO_CONFIG;
+        attr.size = self.config_json.len() as u64;
+        attr.blocks = 1;
+        attr.kind = FileType::RegularFile;
+        attr
+    }
+
     fn populate<P: AsRef<Path>>(file_db: &Connection, path: P, parent_ino: u64) {
         let path = path.as_ref();
 
@@ -183,6 +194,12 @@ impl SplitFS {
 
 impl Filesystem for SplitFS {
     fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
+        if parent == INO_ROOT && name == CONFIG_FILE_NAME {
+            let attr = self.get_config_attr();
+            reply.entry(&TTL, &attr, 0);
+            return;
+        }
+
         let file_info =
             self.get_file_info_from_parent_ino_and_file_name(parent, OsString::from(name));
         if let Ok(file_info) = file_info {
@@ -194,6 +211,12 @@ impl Filesystem for SplitFS {
     }
 
     fn getattr(&mut self, _req: &Request, ino: u64, reply: ReplyAttr) {
+        if ino == INO_CONFIG {
+            let attr = self.get_config_attr();
+            reply.attr(&TTL, &attr);
+            return;
+        }
+
         let file_info = self.get_file_info_from_ino(ino);
         if let Ok(file_info) = file_info {
             let attr = self.get_attr_from_file_info(&file_info);
@@ -204,6 +227,11 @@ impl Filesystem for SplitFS {
     }
 
     fn open(&mut self, _req: &Request, ino: u64, _flags: u32, reply: ReplyOpen) {
+        if ino == INO_CONFIG {
+            reply.opened(0, 0);
+            return;
+        }
+
         let file_info = self.get_file_info_from_ino(ino);
         if let Ok(file_info) = file_info {
             let file = self
@@ -227,12 +255,17 @@ impl Filesystem for SplitFS {
     fn read(
         &mut self,
         _req: &Request,
-        _ino: u64,
+        ino: u64,
         fh: u64,
         offset: i64,
         size: u32,
         reply: ReplyData,
     ) {
+        if ino == INO_CONFIG {
+            reply.data(self.config_json.as_ref());
+            return;
+        }
+
         let offset = offset as u64;
         let size = size as u64;
 
@@ -261,13 +294,18 @@ impl Filesystem for SplitFS {
     fn release(
         &mut self,
         _req: &Request,
-        _ino: u64,
+        ino: u64,
         fh: u64,
         _flags: u32,
         _lock_owner: u64,
         _flush: bool,
         reply: ReplyEmpty,
     ) {
+        if ino == INO_CONFIG {
+            reply.ok();
+            return;
+        }
+
         self.file_handles.remove(&fh);
         reply.ok();
     }
@@ -283,11 +321,11 @@ impl Filesystem for SplitFS {
         let file_info = self.get_file_info_from_ino(ino);
 
         if let Ok(file_info) = file_info {
-            // . and .. make 2
-            let additional_offset_max = 2;
+            // . and .. make 2 and optionally 1 for .scfs_config
+            let additional_offset_max = 2 + if file_info.ino == 1 { 1 } else { 0 };
 
             let mut additional_offset = 0;
-            if offset < 2 {
+            if offset < 3 {
                 if offset < 1 {
                     reply.add(file_info.ino, 1, FileType::Directory, ".");
                     additional_offset += 1;
@@ -305,6 +343,13 @@ impl Filesystem for SplitFS {
                         "..",
                     );
                     additional_offset += 1;
+                }
+
+                if offset < 3 {
+                    if file_info.ino == INO_ROOT {
+                        reply.add(INO_CONFIG, 3, FileType::RegularFile, CONFIG_FILE_NAME);
+                        additional_offset += 1;
+                    }
                 }
             }
 
