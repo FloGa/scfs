@@ -13,17 +13,25 @@ use libc::ENOENT;
 use rusqlite::{params, Connection, Error, NO_PARAMS};
 
 use crate::{
-    convert_metadata_to_attr, FileHandle, FileInfo, FileInfoRow, BLOCK_SIZE, INO_OUTSIDE, INO_ROOT,
-    STMT_CREATE, STMT_INSERT, STMT_QUERY_BY_INO, STMT_QUERY_BY_PARENT_INO, TTL,
+    convert_metadata_to_attr, Config, FileHandle, FileInfo, FileInfoRow, BLOCK_SIZE,
+    CONFIG_FILE_NAME, INO_OUTSIDE, INO_ROOT, STMT_CREATE, STMT_INSERT, STMT_QUERY_BY_INO,
+    STMT_QUERY_BY_PARENT_INO, TTL,
 };
 
 pub struct CatFS {
     file_db: Connection,
     file_handles: HashMap<u64, Vec<FileHandle>>,
+    config: Config,
 }
 
 impl CatFS {
     pub fn new(mirror: OsString) -> Self {
+        let config = serde_json::from_str(
+            &fs::read_to_string(Path::new(&mirror).join(CONFIG_FILE_NAME))
+                .expect("SCFS config file not found"),
+        )
+        .expect("SCFS config file contains invalid JSON");
+
         let file_db = Connection::open_in_memory().unwrap();
 
         file_db.execute(STMT_CREATE, NO_PARAMS).unwrap();
@@ -44,6 +52,7 @@ impl CatFS {
         CatFS {
             file_db,
             file_handles,
+            config,
         }
     }
 
@@ -132,6 +141,10 @@ impl CatFS {
 
     fn populate<P: AsRef<Path>>(file_db: &Connection, path: P, parent_ino: u64) {
         let path = path.as_ref();
+
+        if path.file_name().unwrap() == CONFIG_FILE_NAME {
+            return;
+        }
 
         let ino = if parent_ino == INO_OUTSIDE {
             INO_ROOT
