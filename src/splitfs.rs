@@ -13,13 +13,15 @@ use libc::ENOENT;
 use rusqlite::{params, Connection, Error, NO_PARAMS};
 
 use crate::{
-    convert_metadata_to_attr, FileHandle, FileInfo, FileInfoRow, BLOCK_SIZE, INO_OUTSIDE, INO_ROOT,
+    convert_metadata_to_attr, Config, FileHandle, FileInfo, FileInfoRow, BLOCK_SIZE, INO_OUTSIDE, INO_ROOT,
     STMT_CREATE, STMT_INSERT, STMT_QUERY_BY_INO, STMT_QUERY_BY_PARENT_INO, TTL,
 };
 
 pub struct SplitFS {
     file_db: Connection,
     file_handles: HashMap<u64, FileHandle>,
+    config: Config,
+    config_json: String,
 }
 
 impl SplitFS {
@@ -32,9 +34,14 @@ impl SplitFS {
 
         let file_handles = Default::default();
 
+        let config = Config {};
+        let config_json = serde_json::to_string(&config).unwrap();
+
         SplitFS {
             file_db,
             file_handles,
+            config,
+            config_json,
         }
     }
 
