@@ -107,6 +107,7 @@ use std::os::linux::fs::MetadataExt;
 
 use fuse::{FileAttr, FileType};
 use rusqlite::Row;
+use serde::{Deserialize, Serialize};
 use time::Timespec;
 
 pub use catfs::CatFS;
@@ -259,3 +260,6 @@ impl From<FileInfo> for FileInfoRow {
         }
     }
 }
+
+#[derive(Serialize, Deserialize, Debug)]
+struct Config {}
