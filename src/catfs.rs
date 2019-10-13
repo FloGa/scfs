@@ -25,7 +25,7 @@ pub struct CatFS {
 }
 
 impl CatFS {
-    pub fn new(mirror: OsString) -> Self {
+    pub fn new(mirror: &OsStr) -> Self {
         let config = serde_json::from_str(
             &fs::read_to_string(Path::new(&mirror).join(CONFIG_FILE_NAME))
                 .expect("SCFS config file not found"),

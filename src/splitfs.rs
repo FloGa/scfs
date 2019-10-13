@@ -26,7 +26,7 @@ pub struct SplitFS {
 }
 
 impl SplitFS {
-    pub fn new(mirror: OsString) -> Self {
+    pub fn new(mirror: &OsStr) -> Self {
         let file_db = Connection::open_in_memory().unwrap();
 
         file_db.execute(STMT_CREATE, NO_PARAMS).unwrap();

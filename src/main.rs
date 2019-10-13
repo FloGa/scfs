@@ -2,20 +2,43 @@ use std::env;
 use std::ffi::OsStr;
 use std::sync::mpsc::channel;
 
+use clap::{crate_authors, crate_description, crate_name, crate_version, App, Arg};
+
 use scfs::{CatFS, SplitFS};
 
+const ARG_MODE: &str = "mode";
+const ARG_MIRROR: &str = "mirror";
+const ARG_MOUNTPOINT: &str = "mountpoint";
+
 fn main() {
-    let mode = env::args_os().nth(1).unwrap();
-    let mirror = env::args_os().nth(2).unwrap();
-    let mountpoint = env::args_os().nth(3).unwrap();
+    let matches = App::new(crate_name!())
+        .version(crate_version!())
+        .author(crate_authors!())
+        .about(crate_description!())
+        .arg(
+            Arg::with_name(ARG_MODE)
+                .short(&ARG_MODE[0..1])
+                .long(ARG_MODE)
+                .value_name(ARG_MODE.to_uppercase().as_str())
+                .help("Sets the desired mode, split or cat")
+                .takes_value(true)
+                .required(true),
+        )
+        .arg(
+            Arg::with_name(ARG_MIRROR)
+                .help("Defines the directory that will be mirrored")
+                .required(true),
+        )
+        .arg(
+            Arg::with_name(ARG_MOUNTPOINT)
+                .help("Defines the mountpoint, where the mirror will be accessible")
+                .required(true),
+        )
+        .get_matches();
 
-    let mode = mode.into_string().unwrap();
-
-    if !mode.starts_with("--mode=") {
-        panic!("Mode flag must be given as --mode=cat or --mode=split");
-    };
-
-    let mode = &mode[7..];
+    let mode = matches.value_of(ARG_MODE).unwrap();
+    let mirror = matches.value_of_os(ARG_MIRROR).unwrap();
+    let mountpoint = matches.value_of_os(ARG_MOUNTPOINT).unwrap();
 
     let options = ["-o", "ro", "-o", "fsname=scfs"]
         .iter()
