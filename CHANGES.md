@@ -1,4 +1,92 @@
-# Changes since latest release
+# Changes in 0.6.0
+
+-   Remove thread limit
+    
+    I no longer enforce a thread limit via a thread pool. If you want to
+    fire up a thousand threads, then go ahead.
+
+-   Use Option in metadata converter
+    
+    Using an Option is a more natural way of expressing the intention. If I
+    give a ino, use it, if I don't then do something to generate one. At the
+    moment that means to take the ino of the existing file in SplitFS or use
+    the current timestamp in CatFS.
+    
+    The Option object is preferred over conventions like using a special
+    value such as 0.
+
+-   Use constants for special inos
+    
+    By using named constants it will be easier to understand what the
+    numbers really mean.
+
+-   Calculate additional offset instead of hardcode
+    
+    If virtual entries like . and .. are added to the directory list, the
+    offset needs to be adjusted accordingly. To provide a scalable solution,
+    calculate this additional offset instead of just hardcode a specific
+    number.
+
+-   Make virtual offset code more readable
+    
+    To explicitly show when the offset has to be adjusted, I added another,
+    yet redundant, conditional block. It is not strictly necessary but it
+    makes it possible of adding more such virtual rules in the future
+    without adjusting existing code.
+
+-   Add Config struct
+    
+    This struct will contain possible changeable configuration parameters in
+    the future. For now it is empty.
+
+-   Use clap to parse cli arguments
+
+-   Add file name to database
+    
+    To provide more efficient queries, use the file name in addition to the
+    complete path in the database.
+
+-   Use file name in query
+    
+    By using the file name in the SELECT query instead of iterating over all
+    items, the lookups are handled in a much shorter time. This way, even
+    directories with a huge amount of files can be listed in reasonable
+    time.
+
+-   Create index on parent_ino and file_name
+    
+    This results in faster queries in lookups.
+
+-   Short circuit readdir
+    
+    When the readdir buffer is full, the iteration can be suspended. It will
+    be resumed by the next filesystem call with the appropriate offset.
+    
+    This results in a performance boost by not needlessly iterating over
+    entries that will be ignored anyway.
+
+-   Remove DISTINCT from SELECT statement
+    
+    DISTINCT is not necessary in this case and only increases the time
+    needed to complete the query.
+
+-   Let FileInfo derive from Default
+    
+    This way it is possible to easily create a default instance with default
+    values for each member.
+
+-   Use converters for correct DB representation
+    
+    By going the extra mile via the FileInfo-FileInfoRow converter, the
+    correct representation of the members in the database can be ensured,
+    even with more complex conversion methods, like encoding with JSON or
+    the like.
+
+-   Use u8 Vector to represent paths in the db
+    
+    The conversion to String is lossy and can result in problems with
+    special characters that can not be correctly represented. By using a
+    byte Vector the paths can be stored raw, without any encoding.
 
 # Changes in 0.5.0
 
