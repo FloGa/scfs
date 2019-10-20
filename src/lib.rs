@@ -133,6 +133,8 @@ const STMT_INSERT: &str =
     "INSERT INTO Files (ino, parent_ino, path, file_name, part, vdir) VALUES (?, ?, ?, ?, ?, ?)";
 const STMT_QUERY_BY_INO: &str = "SELECT * FROM Files WHERE ino = ?";
 const STMT_QUERY_BY_PARENT_INO: &str = "SELECT * FROM Files WHERE parent_ino = ? LIMIT -1 OFFSET ?";
+const STMT_QUERY_BY_PARENT_INO_AND_FILENAME: &str =
+    "SELECT * FROM Files WHERE parent_ino = ? AND file_name = ?";
 
 const BLOCK_SIZE: u64 = 2 * 1024 * 1024;
 
