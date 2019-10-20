@@ -240,12 +240,12 @@ struct FileInfoRow {
 impl From<&Row<'_>> for FileInfoRow {
     fn from(row: &Row) -> Self {
         FileInfoRow {
-            ino: row.get(0).unwrap(),
-            parent_ino: row.get(1).unwrap(),
-            path: row.get(2).unwrap(),
-            file_name: row.get(3).unwrap(),
-            part: row.get(4).unwrap(),
-            vdir: row.get(5).unwrap(),
+            ino: row.get_unwrap(0),
+            parent_ino: row.get_unwrap(1),
+            path: row.get_unwrap(2),
+            file_name: row.get_unwrap(3),
+            part: row.get_unwrap(4),
+            vdir: row.get_unwrap(5),
         }
     }
 }
