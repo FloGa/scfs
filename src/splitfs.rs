@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};
-use std::fs;
 use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
+use std::{fs, thread};
 
 use fuse::{
     FileAttr, FileType, Filesystem, ReplyAttr, ReplyData, ReplyDirectory, ReplyEmpty, ReplyEntry,
@@ -11,35 +11,43 @@ use fuse::{
 };
 use libc::ENOENT;
 use rusqlite::{params, Connection, Error, NO_PARAMS};
-use threadpool::ThreadPool;
 
 use crate::{
-    convert_metadata_to_attr, FileHandle, FileInfo, FileInfoRow, BLOCK_SIZE, STMT_CREATE,
-    STMT_INSERT, STMT_QUERY_BY_INO, STMT_QUERY_BY_PARENT_INO, TTL,
+    convert_metadata_to_attr, Config, FileHandle, FileInfo, FileInfoRow, BLOCK_SIZE,
+    CONFIG_FILE_NAME, INO_CONFIG, INO_OUTSIDE, INO_ROOT, STMT_CREATE,
+    STMT_CREATE_INDEX_PARENT_INO_FILE_NAME, STMT_INSERT, STMT_QUERY_BY_INO,
+    STMT_QUERY_BY_PARENT_INO, STMT_QUERY_BY_PARENT_INO_AND_FILENAME, TTL,
 };
 
 pub struct SplitFS {
     file_db: Connection,
     file_handles: HashMap<u64, FileHandle>,
-    threadpool: ThreadPool,
+    config: Config,
+    config_json: String,
 }
 
 impl SplitFS {
-    pub fn new(mirror: OsString) -> Self {
+    pub fn new(mirror: &OsStr) -> Self {
         let file_db = Connection::open_in_memory().unwrap();
 
         file_db.execute(STMT_CREATE, NO_PARAMS).unwrap();
 
-        SplitFS::populate(&file_db, &mirror, 0);
+        SplitFS::populate(&file_db, &mirror, INO_OUTSIDE);
+
+        file_db
+            .execute(STMT_CREATE_INDEX_PARENT_INO_FILE_NAME, NO_PARAMS)
+            .unwrap();
 
         let file_handles = Default::default();
 
-        let threadpool = Default::default();
+        let config = Config {};
+        let config_json = serde_json::to_string(&config).unwrap();
 
         SplitFS {
             file_db,
             file_handles,
-            threadpool,
+            config,
+            config_json,
         }
     }
 
@@ -64,35 +72,33 @@ impl SplitFS {
 
         let mut stmt = self
             .file_db
-            .prepare_cached(STMT_QUERY_BY_PARENT_INO)
+            .prepare_cached(STMT_QUERY_BY_PARENT_INO_AND_FILENAME)
             .unwrap();
 
-        let inos = stmt
-            .query_map(params![parent_ino, 0], |row| Ok(FileInfo::from(row).ino))
-            .unwrap();
+        let file_name = FileInfo::default()
+            .file_name(file_name)
+            .into_file_info_row()
+            .file_name;
 
-        let file_info = inos
-            .map(|ino| {
-                let ino = ino.unwrap();
-                self.get_file_info_from_ino(ino).unwrap()
+        let file_info = stmt
+            .query_map(params![parent_ino, file_name], |row| {
+                Ok(FileInfo::from(row))
             })
-            .skip_while(|file_info| {
-                let name_from_db = Path::new(&file_info.path).file_name().unwrap();
-                let name_to_look_for = Path::new(&file_name).file_name().unwrap();
-                name_from_db != name_to_look_for
-            })
+            .unwrap()
             .next();
 
         match file_info {
-            Some(f) => Ok(f),
+            Some(f) => Ok(f.unwrap()),
             None => Err(Error::QueryReturnedNoRows),
         }
     }
 
     fn get_attr_from_file_info(&self, file_info: &FileInfo) -> FileAttr {
         if file_info.part == 0 {
-            let mut attr =
-                convert_metadata_to_attr(fs::metadata(&file_info.path).unwrap(), file_info.ino);
+            let mut attr = convert_metadata_to_attr(
+                fs::metadata(&file_info.path).unwrap(),
+                Some(file_info.ino),
+            );
             attr.kind = FileType::Directory;
             attr.blocks = 0;
             attr.perm = 0o755;
@@ -105,20 +111,30 @@ impl SplitFS {
                         .path,
                 )
                 .unwrap(),
-                file_info.ino,
+                Some(file_info.ino),
             );
             attr.size = u64::min(BLOCK_SIZE, attr.size - (file_info.part - 1) * BLOCK_SIZE);
             attr
         }
     }
 
+    fn get_config_attr(&self) -> FileAttr {
+        let file_info = self.get_file_info_from_ino(INO_ROOT).unwrap();
+        let mut attr = self.get_attr_from_file_info(&file_info);
+        attr.ino = INO_CONFIG;
+        attr.size = self.config_json.len() as u64;
+        attr.blocks = 1;
+        attr.kind = FileType::RegularFile;
+        attr
+    }
+
     fn populate<P: AsRef<Path>>(file_db: &Connection, path: P, parent_ino: u64) {
         let path = path.as_ref();
 
-        let mut attr = convert_metadata_to_attr(path.metadata().unwrap(), 0);
+        let mut attr = convert_metadata_to_attr(path.metadata().unwrap(), None);
 
-        attr.ino = if parent_ino == 0 {
-            1
+        attr.ino = if parent_ino == INO_OUTSIDE {
+            INO_ROOT
         } else {
             time::precise_time_ns()
         };
@@ -127,6 +143,7 @@ impl SplitFS {
             ino: attr.ino,
             parent_ino,
             path: OsString::from(path),
+            file_name: path.file_name().unwrap().into(),
             part: 0,
             vdir: attr.kind == FileType::RegularFile,
         });
@@ -138,6 +155,7 @@ impl SplitFS {
                 file_info.ino,
                 file_info.parent_ino,
                 file_info.path,
+                file_info.file_name,
                 file_info.part,
                 file_info.vdir
             ])
@@ -146,10 +164,12 @@ impl SplitFS {
         if let FileType::RegularFile = attr.kind {
             let blocks = f64::ceil(attr.size as f64 / BLOCK_SIZE as f64) as u64;
             for i in 0..blocks {
+                let file_name = format!("scfs.{:010}", i).into();
                 let file_info = FileInfoRow::from(FileInfo {
                     ino: attr.ino + i + 1,
                     parent_ino: attr.ino,
-                    path: OsString::from(path.join(format!("scfs.{:010}", i))),
+                    path: OsString::from(path.join(&file_name)),
+                    file_name,
                     part: i + 1,
                     vdir: false,
                 });
@@ -161,6 +181,7 @@ impl SplitFS {
                         file_info.ino,
                         file_info.parent_ino,
                         file_info.path,
+                        file_info.file_name,
                         file_info.part,
                         file_info.vdir
                     ])
@@ -179,6 +200,12 @@ impl SplitFS {
 
 impl Filesystem for SplitFS {
     fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
+        if parent == INO_ROOT && name == CONFIG_FILE_NAME {
+            let attr = self.get_config_attr();
+            reply.entry(&TTL, &attr, 0);
+            return;
+        }
+
         let file_info =
             self.get_file_info_from_parent_ino_and_file_name(parent, OsString::from(name));
         if let Ok(file_info) = file_info {
@@ -190,6 +217,12 @@ impl Filesystem for SplitFS {
     }
 
     fn getattr(&mut self, _req: &Request, ino: u64, reply: ReplyAttr) {
+        if ino == INO_CONFIG {
+            let attr = self.get_config_attr();
+            reply.attr(&TTL, &attr);
+            return;
+        }
+
         let file_info = self.get_file_info_from_ino(ino);
         if let Ok(file_info) = file_info {
             let attr = self.get_attr_from_file_info(&file_info);
@@ -200,6 +233,11 @@ impl Filesystem for SplitFS {
     }
 
     fn open(&mut self, _req: &Request, ino: u64, _flags: u32, reply: ReplyOpen) {
+        if ino == INO_CONFIG {
+            reply.opened(0, 0);
+            return;
+        }
+
         let file_info = self.get_file_info_from_ino(ino);
         if let Ok(file_info) = file_info {
             let file = self
@@ -223,12 +261,17 @@ impl Filesystem for SplitFS {
     fn read(
         &mut self,
         _req: &Request,
-        _ino: u64,
+        ino: u64,
         fh: u64,
         offset: i64,
         size: u32,
         reply: ReplyData,
     ) {
+        if ino == INO_CONFIG {
+            reply.data(self.config_json.as_ref());
+            return;
+        }
+
         let offset = offset as u64;
         let size = size as u64;
 
@@ -239,7 +282,7 @@ impl Filesystem for SplitFS {
         let size = size.min(handle.end - handle.start - offset);
         let start = handle.start;
 
-        self.threadpool.execute(move || {
+        thread::spawn(move || {
             let mut file = BufReader::new(File::open(file).unwrap());
 
             file.seek(SeekFrom::Start(start + offset)).unwrap();
@@ -257,13 +300,18 @@ impl Filesystem for SplitFS {
     fn release(
         &mut self,
         _req: &Request,
-        _ino: u64,
+        ino: u64,
         fh: u64,
         _flags: u32,
         _lock_owner: u64,
         _flush: bool,
         reply: ReplyEmpty,
     ) {
+        if ino == INO_CONFIG {
+            reply.ok();
+            return;
+        }
+
         self.file_handles.remove(&fh);
         reply.ok();
     }
@@ -279,20 +327,36 @@ impl Filesystem for SplitFS {
         let file_info = self.get_file_info_from_ino(ino);
 
         if let Ok(file_info) = file_info {
-            if offset < 2 {
-                if offset == 0 {
+            // . and .. make 2 and optionally 1 for .scfs_config
+            let additional_offset_max = 2 + if file_info.ino == 1 { 1 } else { 0 };
+
+            let mut additional_offset = 0;
+            if offset < 3 {
+                if offset < 1 {
                     reply.add(file_info.ino, 1, FileType::Directory, ".");
+                    additional_offset += 1;
                 }
-                reply.add(
-                    if file_info.parent_ino == 0 {
-                        file_info.ino
-                    } else {
-                        file_info.parent_ino
-                    },
-                    2,
-                    FileType::Directory,
-                    "..",
-                );
+
+                if offset < 2 {
+                    reply.add(
+                        if file_info.parent_ino == INO_OUTSIDE {
+                            file_info.ino
+                        } else {
+                            file_info.parent_ino
+                        },
+                        2,
+                        FileType::Directory,
+                        "..",
+                    );
+                    additional_offset += 1;
+                }
+
+                if offset < 3 {
+                    if file_info.ino == INO_ROOT {
+                        reply.add(INO_CONFIG, 3, FileType::RegularFile, CONFIG_FILE_NAME);
+                        additional_offset += 1;
+                    }
+                }
             }
 
             let mut stmt = self
@@ -306,7 +370,7 @@ impl Filesystem for SplitFS {
                         // The offset includes . and .., both which are not included in the
                         // database, so the SELECT offset must be adjusted. Since the offset could
                         // be negative, set it to 0 in that case.
-                        0.max(offset - 2)
+                        0.max(offset - additional_offset_max)
                     ],
                     |row| Ok(FileInfo::from(row)),
                 )
@@ -326,18 +390,9 @@ impl Filesystem for SplitFS {
                 // has been already added. For the additional "..", the offset has to be increased
                 // by 1. If the offset is greater than 1, then the hardlinks have been taken care
                 // of and the offset is already correct.
-                reply.add(
+                let is_full = reply.add(
                     item.ino,
-                    offset
-                        + if offset == 0 {
-                            2
-                        } else if offset == 1 {
-                            1
-                        } else {
-                            0
-                        }
-                        + off as i64
-                        + 1,
+                    offset + additional_offset + off as i64 + 1,
                     if item.part > 0 {
                         FileType::RegularFile
                     } else {
@@ -345,6 +400,10 @@ impl Filesystem for SplitFS {
                     },
                     Path::new(&item.path).file_name().unwrap(),
                 );
+
+                if is_full {
+                    break;
+                }
             }
             reply.ok();
         } else {

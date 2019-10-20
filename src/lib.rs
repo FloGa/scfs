@@ -104,9 +104,12 @@ use std::ffi::OsString;
 use std::fs;
 use std::fs::Metadata;
 use std::os::linux::fs::MetadataExt;
+use std::os::unix::ffi::OsStrExt;
+use std::os::unix::ffi::OsStringExt;
 
 use fuse::{FileAttr, FileType};
 use rusqlite::Row;
+use serde::{Deserialize, Serialize};
 use time::Timespec;
 
 pub use catfs::CatFS;
@@ -124,15 +127,26 @@ const STMT_CREATE: &str = "CREATE TABLE Files (
     ino INTEGER PRIMARY KEY,
     parent_ino INTEGER,
     path TEXT UNIQUE,
+    file_name TEXT,
     part INTEGER,
     vdir INTEGER
     )";
+const STMT_CREATE_INDEX_PARENT_INO_FILE_NAME: &str =
+    "CREATE INDEX idx_parent_ino_file_name ON Files (parent_ino, file_name)";
 const STMT_INSERT: &str =
-    "INSERT INTO Files (ino, parent_ino, path, part, vdir) VALUES (?, ?, ?, ?, ?)";
+    "INSERT INTO Files (ino, parent_ino, path, file_name, part, vdir) VALUES (?, ?, ?, ?, ?, ?)";
 const STMT_QUERY_BY_INO: &str = "SELECT * FROM Files WHERE ino = ?";
 const STMT_QUERY_BY_PARENT_INO: &str = "SELECT * FROM Files WHERE parent_ino = ? LIMIT -1 OFFSET ?";
+const STMT_QUERY_BY_PARENT_INO_AND_FILENAME: &str =
+    "SELECT * FROM Files WHERE parent_ino = ? AND file_name = ?";
 
 const BLOCK_SIZE: u64 = 2 * 1024 * 1024;
+
+const CONFIG_FILE_NAME: &str = ".scfs_config";
+
+const INO_OUTSIDE: u64 = 0;
+const INO_ROOT: u64 = 1;
+const INO_CONFIG: u64 = 2;
 
 fn convert_filetype(ft: fs::FileType) -> FileType {
     if ft.is_dir() {
@@ -146,9 +160,13 @@ fn convert_filetype(ft: fs::FileType) -> FileType {
     }
 }
 
-fn convert_metadata_to_attr(meta: Metadata, ino: u64) -> FileAttr {
+fn convert_metadata_to_attr(meta: Metadata, ino: Option<u64>) -> FileAttr {
     FileAttr {
-        ino: if ino != 0 { ino } else { meta.st_ino() },
+        ino: if let Some(ino) = ino {
+            ino
+        } else {
+            meta.st_ino()
+        },
         size: meta.st_size(),
         blocks: meta.st_blocks(),
         atime: Timespec::new(meta.st_atime(), meta.st_atime_nsec() as i32),
@@ -171,11 +189,12 @@ struct FileHandle {
     end: u64,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct FileInfo {
     ino: u64,
     parent_ino: u64,
     path: OsString,
+    file_name: OsString,
     part: u64,
     vdir: bool,
 }
@@ -186,6 +205,7 @@ impl FileInfo {
             ino,
             parent_ino: Default::default(),
             path: Default::default(),
+            file_name: Default::default(),
             part: 0,
             vdir: false,
         }
@@ -196,9 +216,19 @@ impl FileInfo {
             ino: Default::default(),
             parent_ino,
             path: Default::default(),
+            file_name: Default::default(),
             part: 0,
             vdir: false,
         }
+    }
+
+    fn file_name<S: Into<OsString>>(mut self, file_name: S) -> Self {
+        self.file_name = file_name.into();
+        self
+    }
+
+    fn into_file_info_row(self) -> FileInfoRow {
+        FileInfoRow::from(self)
     }
 }
 
@@ -212,7 +242,8 @@ impl From<&Row<'_>> for FileInfo {
 struct FileInfoRow {
     ino: i64,
     parent_ino: i64,
-    path: String,
+    path: Vec<u8>,
+    file_name: Vec<u8>,
     part: i64,
     vdir: bool,
 }
@@ -220,11 +251,12 @@ struct FileInfoRow {
 impl From<&Row<'_>> for FileInfoRow {
     fn from(row: &Row) -> Self {
         FileInfoRow {
-            ino: row.get(0).unwrap(),
-            parent_ino: row.get(1).unwrap(),
-            path: row.get(2).unwrap(),
-            part: row.get(3).unwrap(),
-            vdir: row.get(4).unwrap(),
+            ino: row.get_unwrap(0),
+            parent_ino: row.get_unwrap(1),
+            path: row.get_unwrap(2),
+            file_name: row.get_unwrap(3),
+            part: row.get_unwrap(4),
+            vdir: row.get_unwrap(5),
         }
     }
 }
@@ -234,7 +266,8 @@ impl From<FileInfoRow> for FileInfo {
         FileInfo {
             ino: f.ino as u64,
             parent_ino: f.parent_ino as u64,
-            path: OsString::from(f.path),
+            path: OsString::from_vec(f.path),
+            file_name: OsString::from_vec(f.file_name),
             part: f.part as u64,
             vdir: f.vdir,
         }
@@ -246,9 +279,13 @@ impl From<FileInfo> for FileInfoRow {
         FileInfoRow {
             ino: f.ino as i64,
             parent_ino: f.parent_ino as i64,
-            path: f.path.into_string().unwrap(),
+            path: f.path.as_bytes().to_vec(),
+            file_name: f.file_name.as_bytes().to_vec(),
             part: f.part as i64,
             vdir: f.vdir,
         }
     }
 }
+
+#[derive(Serialize, Deserialize, Debug)]
+struct Config {}

@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};
-use std::fs;
 use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
+use std::{fs, thread};
 
 use fuse::{
     FileAttr, FileType, Filesystem, ReplyAttr, ReplyData, ReplyDirectory, ReplyEmpty, ReplyEntry,
@@ -11,31 +11,42 @@ use fuse::{
 };
 use libc::ENOENT;
 use rusqlite::{params, Connection, Error, NO_PARAMS};
-use threadpool::ThreadPool;
 
 use crate::{
-    convert_metadata_to_attr, FileHandle, FileInfo, FileInfoRow, BLOCK_SIZE, STMT_CREATE,
-    STMT_INSERT, STMT_QUERY_BY_INO, STMT_QUERY_BY_PARENT_INO, TTL,
+    convert_metadata_to_attr, Config, FileHandle, FileInfo, FileInfoRow, BLOCK_SIZE,
+    CONFIG_FILE_NAME, INO_OUTSIDE, INO_ROOT, STMT_CREATE, STMT_CREATE_INDEX_PARENT_INO_FILE_NAME,
+    STMT_INSERT, STMT_QUERY_BY_INO, STMT_QUERY_BY_PARENT_INO,
+    STMT_QUERY_BY_PARENT_INO_AND_FILENAME, TTL,
 };
 
 pub struct CatFS {
     file_db: Connection,
     file_handles: HashMap<u64, Vec<FileHandle>>,
-    threadpool: ThreadPool,
+    config: Config,
 }
 
 impl CatFS {
-    pub fn new(mirror: OsString) -> Self {
+    pub fn new(mirror: &OsStr) -> Self {
+        let config = serde_json::from_str(
+            &fs::read_to_string(Path::new(&mirror).join(CONFIG_FILE_NAME))
+                .expect("SCFS config file not found"),
+        )
+        .expect("SCFS config file contains invalid JSON");
+
         let file_db = Connection::open_in_memory().unwrap();
 
         file_db.execute(STMT_CREATE, NO_PARAMS).unwrap();
 
-        CatFS::populate(&file_db, &mirror, 0);
+        CatFS::populate(&file_db, &mirror, INO_OUTSIDE);
+
+        file_db
+            .execute(STMT_CREATE_INDEX_PARENT_INO_FILE_NAME, NO_PARAMS)
+            .unwrap();
 
         {
             let query = "UPDATE Files SET vdir = 1
                  WHERE ino IN (
-                    SELECT DISTINCT parent_ino FROM Files WHERE part != 0
+                    SELECT parent_ino FROM Files WHERE part != 0
                 )";
             let mut stmt = file_db.prepare(query).unwrap();
             stmt.execute(NO_PARAMS).unwrap();
@@ -43,12 +54,10 @@ impl CatFS {
 
         let file_handles = Default::default();
 
-        let threadpool = Default::default();
-
         CatFS {
             file_db,
             file_handles,
-            threadpool,
+            config,
         }
     }
 
@@ -87,27 +96,23 @@ impl CatFS {
 
         let mut stmt = self
             .file_db
-            .prepare_cached(STMT_QUERY_BY_PARENT_INO)
+            .prepare_cached(STMT_QUERY_BY_PARENT_INO_AND_FILENAME)
             .unwrap();
 
-        let inos = stmt
-            .query_map(params![parent_ino, 0], |row| Ok(FileInfo::from(row).ino))
-            .unwrap();
+        let file_name = FileInfo::default()
+            .file_name(file_name)
+            .into_file_info_row()
+            .file_name;
 
-        let file_info = inos
-            .map(|ino| {
-                let ino = ino.unwrap();
-                self.get_file_info_from_ino(ino).unwrap()
+        let file_info = stmt
+            .query_map(params![parent_ino, file_name], |row| {
+                Ok(FileInfo::from(row))
             })
-            .skip_while(|file_info| {
-                let name_from_db = Path::new(&file_info.path).file_name().unwrap();
-                let name_to_look_for = Path::new(&file_name).file_name().unwrap();
-                name_from_db != name_to_look_for
-            })
+            .unwrap()
             .next();
 
         match file_info {
-            Some(f) => Ok(f),
+            Some(f) => Ok(f.unwrap()),
             None => Err(Error::QueryReturnedNoRows),
         }
     }
@@ -117,7 +122,9 @@ impl CatFS {
             let parts = self.get_files_info_from_parent_ino(file_info.ino);
             let attrs = parts
                 .iter()
-                .map(|info| convert_metadata_to_attr(fs::metadata(&info.path).unwrap(), info.ino))
+                .map(|info| {
+                    convert_metadata_to_attr(fs::metadata(&info.path).unwrap(), Some(info.ino))
+                })
                 .collect::<Vec<_>>();
             let mut attr = attrs.get(0).unwrap().clone();
             attr.ino = file_info.ino;
@@ -125,8 +132,10 @@ impl CatFS {
             attr.size = attrs.iter().map(|attr| attr.size).sum();
             attr
         } else {
-            let attr =
-                convert_metadata_to_attr(fs::metadata(&file_info.path).unwrap(), file_info.ino);
+            let attr = convert_metadata_to_attr(
+                fs::metadata(&file_info.path).unwrap(),
+                Some(file_info.ino),
+            );
             attr
         }
     }
@@ -134,8 +143,12 @@ impl CatFS {
     fn populate<P: AsRef<Path>>(file_db: &Connection, path: P, parent_ino: u64) {
         let path = path.as_ref();
 
-        let ino = if parent_ino == 0 {
-            1
+        if path.file_name().unwrap() == CONFIG_FILE_NAME {
+            return;
+        }
+
+        let ino = if parent_ino == INO_OUTSIDE {
+            INO_ROOT
         } else {
             time::precise_time_ns()
         };
@@ -144,6 +157,7 @@ impl CatFS {
             ino,
             parent_ino,
             path: OsString::from(path),
+            file_name: path.file_name().unwrap().into(),
             part: if path.is_file() {
                 path.file_name().unwrap().to_str().unwrap()[5..]
                     .parse::<u64>()
@@ -162,6 +176,7 @@ impl CatFS {
                 file_info.ino,
                 file_info.parent_ino,
                 file_info.path,
+                file_info.file_name,
                 file_info.part,
                 file_info.vdir
             ])
@@ -249,7 +264,7 @@ impl Filesystem for CatFS {
             })
             .collect::<Vec<_>>();
 
-        self.threadpool.execute(move || {
+        thread::spawn(move || {
             let part_start = 0;
             let part_end = files.len() - 1;
 
@@ -314,7 +329,7 @@ impl Filesystem for CatFS {
                     reply.add(file_info.ino, 1, FileType::Directory, ".");
                 }
                 reply.add(
-                    if file_info.parent_ino == 0 {
+                    if file_info.parent_ino == INO_OUTSIDE {
                         file_info.ino
                     } else {
                         file_info.parent_ino
@@ -356,7 +371,7 @@ impl Filesystem for CatFS {
                 // has been already added. For the additional "..", the offset has to be increased
                 // by 1. If the offset is greater than 1, then the hardlinks have been taken care
                 // of and the offset is already correct.
-                reply.add(
+                let is_full = reply.add(
                     item.ino,
                     offset
                         + if offset == 0 {
@@ -375,6 +390,10 @@ impl Filesystem for CatFS {
                     },
                     Path::new(&item.path).file_name().unwrap(),
                 );
+
+                if is_full {
+                    break;
+                }
             }
             reply.ok();
         } else {
