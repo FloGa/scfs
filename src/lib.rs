@@ -125,11 +125,12 @@ const STMT_CREATE: &str = "CREATE TABLE Files (
     ino INTEGER PRIMARY KEY,
     parent_ino INTEGER,
     path TEXT UNIQUE,
+    file_name TEXT,
     part INTEGER,
     vdir INTEGER
     )";
 const STMT_INSERT: &str =
-    "INSERT INTO Files (ino, parent_ino, path, part, vdir) VALUES (?, ?, ?, ?, ?)";
+    "INSERT INTO Files (ino, parent_ino, path, file_name, part, vdir) VALUES (?, ?, ?, ?, ?, ?)";
 const STMT_QUERY_BY_INO: &str = "SELECT * FROM Files WHERE ino = ?";
 const STMT_QUERY_BY_PARENT_INO: &str = "SELECT * FROM Files WHERE parent_ino = ? LIMIT -1 OFFSET ?";
 
@@ -187,6 +188,7 @@ struct FileInfo {
     ino: u64,
     parent_ino: u64,
     path: OsString,
+    file_name: OsString,
     part: u64,
     vdir: bool,
 }
@@ -197,6 +199,7 @@ impl FileInfo {
             ino,
             parent_ino: Default::default(),
             path: Default::default(),
+            file_name: Default::default(),
             part: 0,
             vdir: false,
         }
@@ -207,6 +210,7 @@ impl FileInfo {
             ino: Default::default(),
             parent_ino,
             path: Default::default(),
+            file_name: Default::default(),
             part: 0,
             vdir: false,
         }
@@ -224,6 +228,7 @@ struct FileInfoRow {
     ino: i64,
     parent_ino: i64,
     path: String,
+    file_name: String,
     part: i64,
     vdir: bool,
 }
@@ -234,8 +239,9 @@ impl From<&Row<'_>> for FileInfoRow {
             ino: row.get(0).unwrap(),
             parent_ino: row.get(1).unwrap(),
             path: row.get(2).unwrap(),
-            part: row.get(3).unwrap(),
-            vdir: row.get(4).unwrap(),
+            file_name: row.get(3).unwrap(),
+            part: row.get(4).unwrap(),
+            vdir: row.get(5).unwrap(),
         }
     }
 }
@@ -246,6 +252,7 @@ impl From<FileInfoRow> for FileInfo {
             ino: f.ino as u64,
             parent_ino: f.parent_ino as u64,
             path: OsString::from(f.path),
+            file_name: OsString::from(f.file_name),
             part: f.part as u64,
             vdir: f.vdir,
         }
@@ -258,6 +265,7 @@ impl From<FileInfo> for FileInfoRow {
             ino: f.ino as i64,
             parent_ino: f.parent_ino as i64,
             path: f.path.into_string().unwrap(),
+            file_name: f.file_name.into_string().unwrap(),
             part: f.part as i64,
             vdir: f.vdir,
         }

@@ -156,6 +156,7 @@ impl CatFS {
             ino,
             parent_ino,
             path: OsString::from(path),
+            file_name: path.file_name().unwrap().into(),
             part: if path.is_file() {
                 path.file_name().unwrap().to_str().unwrap()[5..]
                     .parse::<u64>()
@@ -174,6 +175,7 @@ impl CatFS {
                 file_info.ino,
                 file_info.parent_ino,
                 file_info.path,
+                file_info.file_name,
                 file_info.part,
                 file_info.vdir
             ])

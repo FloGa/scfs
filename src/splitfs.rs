@@ -142,6 +142,7 @@ impl SplitFS {
             ino: attr.ino,
             parent_ino,
             path: OsString::from(path),
+            file_name: path.file_name().unwrap().into(),
             part: 0,
             vdir: attr.kind == FileType::RegularFile,
         });
@@ -153,6 +154,7 @@ impl SplitFS {
                 file_info.ino,
                 file_info.parent_ino,
                 file_info.path,
+                file_info.file_name,
                 file_info.part,
                 file_info.vdir
             ])
@@ -161,10 +163,12 @@ impl SplitFS {
         if let FileType::RegularFile = attr.kind {
             let blocks = f64::ceil(attr.size as f64 / BLOCK_SIZE as f64) as u64;
             for i in 0..blocks {
+                let file_name = format!("scfs.{:010}", i).into();
                 let file_info = FileInfoRow::from(FileInfo {
                     ino: attr.ino + i + 1,
                     parent_ino: attr.ino,
-                    path: OsString::from(path.join(format!("scfs.{:010}", i))),
+                    path: OsString::from(path.join(&file_name)),
+                    file_name,
                     part: i + 1,
                     vdir: false,
                 });
@@ -176,6 +180,7 @@ impl SplitFS {
                         file_info.ino,
                         file_info.parent_ino,
                         file_info.path,
+                        file_info.file_name,
                         file_info.part,
                         file_info.vdir
                     ])
