@@ -367,7 +367,7 @@ impl Filesystem for CatFS {
                 // has been already added. For the additional "..", the offset has to be increased
                 // by 1. If the offset is greater than 1, then the hardlinks have been taken care
                 // of and the offset is already correct.
-                reply.add(
+                let is_full = reply.add(
                     item.ino,
                     offset
                         + if offset == 0 {
@@ -386,6 +386,10 @@ impl Filesystem for CatFS {
                     },
                     Path::new(&item.path).file_name().unwrap(),
                 );
+
+                if is_full {
+                    break;
+                }
             }
             reply.ok();
         } else {
