@@ -75,7 +75,11 @@ impl SplitFS {
             .prepare_cached(STMT_QUERY_BY_PARENT_INO_AND_FILENAME)
             .unwrap();
 
-        let file_name = Path::new(&file_name).file_name().unwrap().to_str().unwrap();
+        let file_name = FileInfo::default()
+            .file_name(file_name)
+            .into_file_info_row()
+            .file_name;
+
         let file_info = stmt
             .query_map(params![parent_ino, file_name], |row| {
                 Ok(FileInfo::from(row))

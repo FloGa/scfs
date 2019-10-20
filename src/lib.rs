@@ -104,6 +104,8 @@ use std::ffi::OsString;
 use std::fs;
 use std::fs::Metadata;
 use std::os::linux::fs::MetadataExt;
+use std::os::unix::ffi::OsStrExt;
+use std::os::unix::ffi::OsStringExt;
 
 use fuse::{FileAttr, FileType};
 use rusqlite::Row;
@@ -187,7 +189,7 @@ struct FileHandle {
     end: u64,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct FileInfo {
     ino: u64,
     parent_ino: u64,
@@ -219,6 +221,15 @@ impl FileInfo {
             vdir: false,
         }
     }
+
+    fn file_name<S: Into<OsString>>(mut self, file_name: S) -> Self {
+        self.file_name = file_name.into();
+        self
+    }
+
+    fn into_file_info_row(self) -> FileInfoRow {
+        FileInfoRow::from(self)
+    }
 }
 
 impl From<&Row<'_>> for FileInfo {
@@ -231,8 +242,8 @@ impl From<&Row<'_>> for FileInfo {
 struct FileInfoRow {
     ino: i64,
     parent_ino: i64,
-    path: String,
-    file_name: String,
+    path: Vec<u8>,
+    file_name: Vec<u8>,
     part: i64,
     vdir: bool,
 }
@@ -255,8 +266,8 @@ impl From<FileInfoRow> for FileInfo {
         FileInfo {
             ino: f.ino as u64,
             parent_ino: f.parent_ino as u64,
-            path: OsString::from(f.path),
-            file_name: OsString::from(f.file_name),
+            path: OsString::from_vec(f.path),
+            file_name: OsString::from_vec(f.file_name),
             part: f.part as u64,
             vdir: f.vdir,
         }
@@ -268,8 +279,8 @@ impl From<FileInfo> for FileInfoRow {
         FileInfoRow {
             ino: f.ino as i64,
             parent_ino: f.parent_ino as i64,
-            path: f.path.into_string().unwrap(),
-            file_name: f.file_name.into_string().unwrap(),
+            path: f.path.as_bytes().to_vec(),
+            file_name: f.file_name.as_bytes().to_vec(),
             part: f.part as i64,
             vdir: f.vdir,
         }
