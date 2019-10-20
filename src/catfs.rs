@@ -46,7 +46,7 @@ impl CatFS {
         {
             let query = "UPDATE Files SET vdir = 1
                  WHERE ino IN (
-                    SELECT DISTINCT parent_ino FROM Files WHERE part != 0
+                    SELECT parent_ino FROM Files WHERE part != 0
                 )";
             let mut stmt = file_db.prepare(query).unwrap();
             stmt.execute(NO_PARAMS).unwrap();
