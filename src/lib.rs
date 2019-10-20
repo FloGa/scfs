@@ -219,6 +219,15 @@ impl FileInfo {
             vdir: false,
         }
     }
+
+    fn file_name<S: Into<OsString>>(mut self, file_name: S) -> Self {
+        self.file_name = file_name.into();
+        self
+    }
+
+    fn into_file_info_row(self) -> FileInfoRow {
+        FileInfoRow::from(self)
+    }
 }
 
 impl From<&Row<'_>> for FileInfo {
