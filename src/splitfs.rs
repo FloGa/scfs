@@ -15,7 +15,7 @@ use rusqlite::{params, Connection, Error, NO_PARAMS};
 use crate::{
     convert_metadata_to_attr, Config, FileHandle, FileInfo, FileInfoRow, BLOCK_SIZE,
     CONFIG_FILE_NAME, INO_CONFIG, INO_OUTSIDE, INO_ROOT, STMT_CREATE, STMT_INSERT,
-    STMT_QUERY_BY_INO, STMT_QUERY_BY_PARENT_INO, TTL,
+    STMT_QUERY_BY_INO, STMT_QUERY_BY_PARENT_INO, STMT_QUERY_BY_PARENT_INO_AND_FILENAME, TTL,
 };
 
 pub struct SplitFS {
@@ -67,27 +67,19 @@ impl SplitFS {
 
         let mut stmt = self
             .file_db
-            .prepare_cached(STMT_QUERY_BY_PARENT_INO)
+            .prepare_cached(STMT_QUERY_BY_PARENT_INO_AND_FILENAME)
             .unwrap();
 
-        let inos = stmt
-            .query_map(params![parent_ino, 0], |row| Ok(FileInfo::from(row).ino))
-            .unwrap();
-
-        let file_info = inos
-            .map(|ino| {
-                let ino = ino.unwrap();
-                self.get_file_info_from_ino(ino).unwrap()
+        let file_name = Path::new(&file_name).file_name().unwrap().to_str().unwrap();
+        let file_info = stmt
+            .query_map(params![parent_ino, file_name], |row| {
+                Ok(FileInfo::from(row))
             })
-            .skip_while(|file_info| {
-                let name_from_db = Path::new(&file_info.path).file_name().unwrap();
-                let name_to_look_for = Path::new(&file_name).file_name().unwrap();
-                name_from_db != name_to_look_for
-            })
+            .unwrap()
             .next();
 
         match file_info {
-            Some(f) => Ok(f),
+            Some(f) => Ok(f.unwrap()),
             None => Err(Error::QueryReturnedNoRows),
         }
     }
@@ -142,6 +134,7 @@ impl SplitFS {
             ino: attr.ino,
             parent_ino,
             path: OsString::from(path),
+            file_name: path.file_name().unwrap().into(),
             part: 0,
             vdir: attr.kind == FileType::RegularFile,
         });
@@ -153,6 +146,7 @@ impl SplitFS {
                 file_info.ino,
                 file_info.parent_ino,
                 file_info.path,
+                file_info.file_name,
                 file_info.part,
                 file_info.vdir
             ])
@@ -161,10 +155,12 @@ impl SplitFS {
         if let FileType::RegularFile = attr.kind {
             let blocks = f64::ceil(attr.size as f64 / BLOCK_SIZE as f64) as u64;
             for i in 0..blocks {
+                let file_name = format!("scfs.{:010}", i).into();
                 let file_info = FileInfoRow::from(FileInfo {
                     ino: attr.ino + i + 1,
                     parent_ino: attr.ino,
-                    path: OsString::from(path.join(format!("scfs.{:010}", i))),
+                    path: OsString::from(path.join(&file_name)),
+                    file_name,
                     part: i + 1,
                     vdir: false,
                 });
@@ -176,6 +172,7 @@ impl SplitFS {
                         file_info.ino,
                         file_info.parent_ino,
                         file_info.path,
+                        file_info.file_name,
                         file_info.part,
                         file_info.vdir
                     ])
