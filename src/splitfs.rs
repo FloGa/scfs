@@ -14,8 +14,9 @@ use rusqlite::{params, Connection, Error, NO_PARAMS};
 
 use crate::{
     convert_metadata_to_attr, Config, FileHandle, FileInfo, FileInfoRow, BLOCK_SIZE,
-    CONFIG_FILE_NAME, INO_CONFIG, INO_OUTSIDE, INO_ROOT, STMT_CREATE, STMT_INSERT,
-    STMT_QUERY_BY_INO, STMT_QUERY_BY_PARENT_INO, TTL,
+    CONFIG_FILE_NAME, INO_CONFIG, INO_OUTSIDE, INO_ROOT, STMT_CREATE,
+    STMT_CREATE_INDEX_PARENT_INO_FILE_NAME, STMT_INSERT, STMT_QUERY_BY_INO,
+    STMT_QUERY_BY_PARENT_INO, TTL,
 };
 
 pub struct SplitFS {
@@ -32,6 +33,10 @@ impl SplitFS {
         file_db.execute(STMT_CREATE, NO_PARAMS).unwrap();
 
         SplitFS::populate(&file_db, &mirror, INO_OUTSIDE);
+
+        file_db
+            .execute(STMT_CREATE_INDEX_PARENT_INO_FILE_NAME, NO_PARAMS)
+            .unwrap();
 
         let file_handles = Default::default();
 
