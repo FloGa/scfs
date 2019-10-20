@@ -14,8 +14,9 @@ use rusqlite::{params, Connection, Error, NO_PARAMS};
 
 use crate::{
     convert_metadata_to_attr, Config, FileHandle, FileInfo, FileInfoRow, BLOCK_SIZE,
-    CONFIG_FILE_NAME, INO_OUTSIDE, INO_ROOT, STMT_CREATE, STMT_INSERT, STMT_QUERY_BY_INO,
-    STMT_QUERY_BY_PARENT_INO, STMT_QUERY_BY_PARENT_INO_AND_FILENAME, TTL,
+    CONFIG_FILE_NAME, INO_OUTSIDE, INO_ROOT, STMT_CREATE, STMT_CREATE_INDEX_PARENT_INO_FILE_NAME,
+    STMT_INSERT, STMT_QUERY_BY_INO, STMT_QUERY_BY_PARENT_INO,
+    STMT_QUERY_BY_PARENT_INO_AND_FILENAME, TTL,
 };
 
 pub struct CatFS {
@@ -37,6 +38,10 @@ impl CatFS {
         file_db.execute(STMT_CREATE, NO_PARAMS).unwrap();
 
         CatFS::populate(&file_db, &mirror, INO_OUTSIDE);
+
+        file_db
+            .execute(STMT_CREATE_INDEX_PARENT_INO_FILE_NAME, NO_PARAMS)
+            .unwrap();
 
         {
             let query = "UPDATE Files SET vdir = 1

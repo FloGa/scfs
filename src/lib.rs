@@ -129,6 +129,8 @@ const STMT_CREATE: &str = "CREATE TABLE Files (
     part INTEGER,
     vdir INTEGER
     )";
+const STMT_CREATE_INDEX_PARENT_INO_FILE_NAME: &str =
+    "CREATE INDEX idx_parent_ino_file_name ON Files (parent_ino, file_name)";
 const STMT_INSERT: &str =
     "INSERT INTO Files (ino, parent_ino, path, file_name, part, vdir) VALUES (?, ?, ?, ?, ?, ?)";
 const STMT_QUERY_BY_INO: &str = "SELECT * FROM Files WHERE ino = ?";
