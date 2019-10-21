@@ -9,10 +9,11 @@ A convenient splitting and concatenating filesystem.
 While setting up a cloud based backup and archive solution, I encountered the
 following phenomenon: Many small files would get uploaded quite fast and –
 depending on the actual cloud storage provider – highly concurrently, while
-big files tend to slow down the whole process. The explanation is simple, most
-cloud storage providers do not support the upload of a single file, sometimes
-they would not even support resuming a partial upload. You would need to
-upload it in one go, sequentially byte for byte, it's all or nothing.
+big files tend to slow down the whole process. The explanation is simple, many
+cloud storage providers do not support concurrent or chunked uploads of a
+single file, sometimes they would not even support resuming a partial upload.
+You would need to upload it in one go, sequentially byte for byte, it's all or
+nothing.
 
 Now consider a scenario, where you upload a really big file, like a mirror of
 your Raspberry Pi's SD card with the system and configuration on it. I have
