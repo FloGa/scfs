@@ -1,4 +1,4 @@
-# Changes in 0.6.1-RC
+# Changes in 0.6.1
 
 -   Fix misleading part in the README
     
