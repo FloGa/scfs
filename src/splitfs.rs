@@ -32,7 +32,7 @@ impl SplitFS {
 
         file_db.execute(STMT_CREATE, NO_PARAMS).unwrap();
 
-        SplitFS::populate(&file_db, &mirror, INO_OUTSIDE);
+        SplitFS::populate(&file_db, &mirror, &config, INO_OUTSIDE);
 
         file_db
             .execute(STMT_CREATE_INDEX_PARENT_INO_FILE_NAME, NO_PARAMS)
@@ -127,7 +127,7 @@ impl SplitFS {
         attr
     }
 
-    fn populate<P: AsRef<Path>>(file_db: &Connection, path: P, parent_ino: u64) {
+    fn populate<P: AsRef<Path>>(file_db: &Connection, path: P, config: &Config, parent_ino: u64) {
         let path = path.as_ref();
 
         let mut attr = convert_metadata_to_attr(path.metadata().unwrap(), None);
@@ -191,7 +191,7 @@ impl SplitFS {
         if path.is_dir() {
             for entry in fs::read_dir(path).unwrap() {
                 let entry = entry.unwrap();
-                SplitFS::populate(&file_db, entry.path(), attr.ino);
+                SplitFS::populate(&file_db, entry.path(), &config, attr.ino);
             }
         }
     }
