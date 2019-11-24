@@ -19,8 +19,9 @@ fn main() {
                 .short(&ARG_MODE[0..1])
                 .long(ARG_MODE)
                 .value_name(ARG_MODE.to_uppercase().as_str())
-                .help("Sets the desired mode, split or cat")
+                .help("Sets the desired mode")
                 .takes_value(true)
+                .possible_values(&["split", "cat"])
                 .required(true),
         )
         .arg(
