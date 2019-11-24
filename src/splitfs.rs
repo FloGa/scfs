@@ -27,7 +27,7 @@ pub struct SplitFS {
 }
 
 impl SplitFS {
-    pub fn new(mirror: &OsStr) -> Self {
+    pub fn new(mirror: &OsStr, config: Config) -> Self {
         let file_db = Connection::open_in_memory().unwrap();
 
         file_db.execute(STMT_CREATE, NO_PARAMS).unwrap();
@@ -40,7 +40,6 @@ impl SplitFS {
 
         let file_handles = Default::default();
 
-        let config = Config::default();
         let config_json = serde_json::to_string(&config).unwrap();
 
         SplitFS {

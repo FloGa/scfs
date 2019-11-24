@@ -3,7 +3,7 @@ use std::sync::mpsc::channel;
 
 use clap::{crate_authors, crate_description, crate_name, crate_version, App, Arg};
 
-use scfs::{CatFS, SplitFS};
+use scfs::{CatFS, Config, SplitFS};
 
 const ARG_MODE: &str = "mode";
 const ARG_MIRROR: &str = "mirror";
@@ -56,7 +56,7 @@ fn main() {
             let fs = CatFS::new(mirror);
             unsafe { fuse::spawn_mount(fs, &mountpoint, &options).unwrap() }
         } else if mode == "split" {
-            let fs = SplitFS::new(mirror);
+            let fs = SplitFS::new(mirror, Config::default());
             unsafe { fuse::spawn_mount(fs, &mountpoint, &options).unwrap() }
         } else {
             panic!("Unknown mode: {:?}", mode);
