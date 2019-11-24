@@ -285,4 +285,13 @@ impl From<FileInfo> for FileInfoRow {
 }
 
 #[derive(Serialize, Deserialize, Debug, Default)]
-struct Config {}
+pub struct Config {
+    blocksize: u64,
+}
+
+impl Config {
+    pub fn blocksize(mut self, blocksize: u64) -> Self {
+        self.blocksize = blocksize;
+        self
+    }
+}
