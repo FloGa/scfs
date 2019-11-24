@@ -1,5 +1,14 @@
 # Changes since latest release
 
+-   Make blocksize customizable
+
+    It is now possible to use a custom blocksize in SplitFS. For example, to
+    use 1MB chunks instead of the default size of 2MB, you would go with:
+
+        scfs --mode=split --blocksize=1048576 <base directory> <mount point>
+
+    Where 1048576 is 1024 * 1024, so one megabyte in bytes.
+
 # Changes in 0.6.1
 
 -   Fix misleading part in the README

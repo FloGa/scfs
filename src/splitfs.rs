@@ -13,10 +13,10 @@ use libc::ENOENT;
 use rusqlite::{params, Connection, Error, NO_PARAMS};
 
 use crate::{
-    convert_metadata_to_attr, Config, FileHandle, FileInfo, FileInfoRow, BLOCK_SIZE,
-    CONFIG_FILE_NAME, INO_CONFIG, INO_OUTSIDE, INO_ROOT, STMT_CREATE,
-    STMT_CREATE_INDEX_PARENT_INO_FILE_NAME, STMT_INSERT, STMT_QUERY_BY_INO,
-    STMT_QUERY_BY_PARENT_INO, STMT_QUERY_BY_PARENT_INO_AND_FILENAME, TTL,
+    convert_metadata_to_attr, Config, FileHandle, FileInfo, FileInfoRow, CONFIG_FILE_NAME,
+    INO_CONFIG, INO_OUTSIDE, INO_ROOT, STMT_CREATE, STMT_CREATE_INDEX_PARENT_INO_FILE_NAME,
+    STMT_INSERT, STMT_QUERY_BY_INO, STMT_QUERY_BY_PARENT_INO,
+    STMT_QUERY_BY_PARENT_INO_AND_FILENAME, TTL,
 };
 
 pub struct SplitFS {
@@ -27,12 +27,12 @@ pub struct SplitFS {
 }
 
 impl SplitFS {
-    pub fn new(mirror: &OsStr) -> Self {
+    pub fn new(mirror: &OsStr, config: Config) -> Self {
         let file_db = Connection::open_in_memory().unwrap();
 
         file_db.execute(STMT_CREATE, NO_PARAMS).unwrap();
 
-        SplitFS::populate(&file_db, &mirror, INO_OUTSIDE);
+        SplitFS::populate(&file_db, &mirror, &config, INO_OUTSIDE);
 
         file_db
             .execute(STMT_CREATE_INDEX_PARENT_INO_FILE_NAME, NO_PARAMS)
@@ -40,7 +40,6 @@ impl SplitFS {
 
         let file_handles = Default::default();
 
-        let config = Config {};
         let config_json = serde_json::to_string(&config).unwrap();
 
         SplitFS {
@@ -113,7 +112,10 @@ impl SplitFS {
                 .unwrap(),
                 Some(file_info.ino),
             );
-            attr.size = u64::min(BLOCK_SIZE, attr.size - (file_info.part - 1) * BLOCK_SIZE);
+            attr.size = u64::min(
+                self.config.blocksize,
+                attr.size - (file_info.part - 1) * self.config.blocksize,
+            );
             attr
         }
     }
@@ -128,7 +130,7 @@ impl SplitFS {
         attr
     }
 
-    fn populate<P: AsRef<Path>>(file_db: &Connection, path: P, parent_ino: u64) {
+    fn populate<P: AsRef<Path>>(file_db: &Connection, path: P, config: &Config, parent_ino: u64) {
         let path = path.as_ref();
 
         let mut attr = convert_metadata_to_attr(path.metadata().unwrap(), None);
@@ -162,7 +164,7 @@ impl SplitFS {
             .unwrap();
 
         if let FileType::RegularFile = attr.kind {
-            let blocks = f64::ceil(attr.size as f64 / BLOCK_SIZE as f64) as u64;
+            let blocks = f64::ceil(attr.size as f64 / config.blocksize as f64) as u64;
             for i in 0..blocks {
                 let file_name = format!("scfs.{:010}", i).into();
                 let file_info = FileInfoRow::from(FileInfo {
@@ -192,7 +194,7 @@ impl SplitFS {
         if path.is_dir() {
             for entry in fs::read_dir(path).unwrap() {
                 let entry = entry.unwrap();
-                SplitFS::populate(&file_db, entry.path(), attr.ino);
+                SplitFS::populate(&file_db, entry.path(), &config, attr.ino);
             }
         }
     }
@@ -245,8 +247,8 @@ impl Filesystem for SplitFS {
                 .unwrap()
                 .path;
 
-            let start = (file_info.part - 1) * BLOCK_SIZE;
-            let end = start + BLOCK_SIZE;
+            let start = (file_info.part - 1) * self.config.blocksize;
+            let end = start + self.config.blocksize;
             let fh = time::precise_time_ns();
 
             self.file_handles

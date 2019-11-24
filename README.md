@@ -71,6 +71,14 @@ The directory specified as `mount point` will now reflect the content of `base
 directory`, replacing each regular file with a directory that contains
 enumerated chunks of that file as separate files.
 
+Since version 0.7.0, it is possible to use a custom blocksize for the splitted
+fragments. For example, to use 1MB chunks instead of the default size of 2MB,
+you would go with:
+
+    scfs --mode=split --blocksize=1048576 <base directory> <mount point>
+
+Where 1048576 is 1024 * 1024, so one megabyte in bytes.
+
 ### CatFS
 
 To mount a directory with CatFS, use the following form:

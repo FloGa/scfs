@@ -71,6 +71,14 @@
 //! directory`, replacing each regular file with a directory that contains
 //! enumerated chunks of that file as separate files.
 //!
+//! Since version 0.7.0, it is possible to use a custom blocksize for the splitted
+//! fragments. For example, to use 1MB chunks instead of the default size of 2MB,
+//! you would go with:
+//!
+//!     scfs --mode=split --blocksize=1048576 <base directory> <mount point>
+//!
+//! Where 1048576 is 1024 * 1024, so one megabyte in bytes.
+//!
 //! ### CatFS
 //!
 //! To mount a directory with CatFS, use the following form:
@@ -136,8 +144,6 @@ const STMT_QUERY_BY_INO: &str = "SELECT * FROM Files WHERE ino = ?";
 const STMT_QUERY_BY_PARENT_INO: &str = "SELECT * FROM Files WHERE parent_ino = ? LIMIT -1 OFFSET ?";
 const STMT_QUERY_BY_PARENT_INO_AND_FILENAME: &str =
     "SELECT * FROM Files WHERE parent_ino = ? AND file_name = ?";
-
-const BLOCK_SIZE: u64 = 2 * 1024 * 1024;
 
 const CONFIG_FILE_NAME: &str = ".scfs_config";
 
@@ -284,5 +290,14 @@ impl From<FileInfo> for FileInfoRow {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-struct Config {}
+#[derive(Serialize, Deserialize, Debug, Default)]
+pub struct Config {
+    blocksize: u64,
+}
+
+impl Config {
+    pub fn blocksize(mut self, blocksize: u64) -> Self {
+        self.blocksize = blocksize;
+        self
+    }
+}

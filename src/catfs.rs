@@ -13,10 +13,9 @@ use libc::ENOENT;
 use rusqlite::{params, Connection, Error, NO_PARAMS};
 
 use crate::{
-    convert_metadata_to_attr, Config, FileHandle, FileInfo, FileInfoRow, BLOCK_SIZE,
-    CONFIG_FILE_NAME, INO_OUTSIDE, INO_ROOT, STMT_CREATE, STMT_CREATE_INDEX_PARENT_INO_FILE_NAME,
-    STMT_INSERT, STMT_QUERY_BY_INO, STMT_QUERY_BY_PARENT_INO,
-    STMT_QUERY_BY_PARENT_INO_AND_FILENAME, TTL,
+    convert_metadata_to_attr, Config, FileHandle, FileInfo, FileInfoRow, CONFIG_FILE_NAME,
+    INO_OUTSIDE, INO_ROOT, STMT_CREATE, STMT_CREATE_INDEX_PARENT_INO_FILE_NAME, STMT_INSERT,
+    STMT_QUERY_BY_INO, STMT_QUERY_BY_PARENT_INO, STMT_QUERY_BY_PARENT_INO_AND_FILENAME, TTL,
 };
 
 pub struct CatFS {
@@ -249,8 +248,8 @@ impl Filesystem for CatFS {
         let offset = offset.min(file_size);
         let size = size.min(file_size - offset);
 
-        let part_start = offset / BLOCK_SIZE as usize;
-        let part_end = (offset + size) / BLOCK_SIZE as usize;
+        let part_start = offset / self.config.blocksize as usize;
+        let part_end = (offset + size) / self.config.blocksize as usize;
 
         let files = (part_start..=part_end)
             .map(|part| {
@@ -264,6 +263,8 @@ impl Filesystem for CatFS {
             })
             .collect::<Vec<_>>();
 
+        let blocksize = self.config.blocksize;
+
         thread::spawn(move || {
             let part_start = 0;
             let part_end = files.len() - 1;
@@ -275,7 +276,7 @@ impl Filesystem for CatFS {
                     let mut file = BufReader::new(File::open(file).unwrap());
 
                     if part == part_start {
-                        file.seek(SeekFrom::Start(offset as u64 % BLOCK_SIZE))
+                        file.seek(SeekFrom::Start(offset as u64 % blocksize))
                             .unwrap();
                     } else {
                         file.seek(SeekFrom::Start(0)).unwrap();
@@ -286,9 +287,9 @@ impl Filesystem for CatFS {
                     bytes
                         .take(if part == part_end {
                             (if part_start == part_end { 0 } else { offset } + size)
-                                % BLOCK_SIZE as usize
+                                % blocksize as usize
                         } else {
-                            BLOCK_SIZE as usize
+                            blocksize as usize
                         })
                         .collect::<Vec<_>>()
                 })
