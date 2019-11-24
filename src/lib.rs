@@ -284,5 +284,5 @@ impl From<FileInfo> for FileInfoRow {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Default)]
 struct Config {}

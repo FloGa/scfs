@@ -40,7 +40,7 @@ impl SplitFS {
 
         let file_handles = Default::default();
 
-        let config = Config {};
+        let config = Config::default();
         let config_json = serde_json::to_string(&config).unwrap();
 
         SplitFS {
