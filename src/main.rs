@@ -1,13 +1,14 @@
 use std::ffi::OsStr;
 use std::sync::mpsc::channel;
 
-use clap::{crate_authors, crate_description, crate_name, crate_version, App, Arg};
+use clap::{crate_authors, crate_description, crate_name, crate_version, value_t, App, Arg};
 
 use scfs::{CatFS, Config, SplitFS};
 
 const ARG_MODE: &str = "mode";
 const ARG_MIRROR: &str = "mirror";
 const ARG_MOUNTPOINT: &str = "mountpoint";
+const ARG_BLOCKSIZE: &str = "blocksize";
 
 fn main() {
     let matches = App::new(crate_name!())
@@ -22,6 +23,15 @@ fn main() {
                 .help("Sets the desired mode, split or cat")
                 .takes_value(true)
                 .required(true),
+        )
+        .arg(
+            Arg::with_name(ARG_BLOCKSIZE)
+                .short(&ARG_BLOCKSIZE[0..1])
+                .long(ARG_BLOCKSIZE)
+                .value_name(ARG_BLOCKSIZE.to_uppercase().as_str())
+                .help("Sets the desired blocksize")
+                .takes_value(true)
+                .default_value("2097152"),
         )
         .arg(
             Arg::with_name(ARG_MIRROR)
@@ -56,7 +66,9 @@ fn main() {
             let fs = CatFS::new(mirror);
             unsafe { fuse::spawn_mount(fs, &mountpoint, &options).unwrap() }
         } else if mode == "split" {
-            let fs = SplitFS::new(mirror, Config::default());
+            let blocksize = value_t!(matches, ARG_BLOCKSIZE, u64).unwrap_or_else(|e| e.exit());
+            let config = Config::default().blocksize(blocksize);
+            let fs = SplitFS::new(mirror, config);
             unsafe { fuse::spawn_mount(fs, &mountpoint, &options).unwrap() }
         } else {
             panic!("Unknown mode: {:?}", mode);
