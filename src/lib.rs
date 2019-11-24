@@ -137,8 +137,6 @@ const STMT_QUERY_BY_PARENT_INO: &str = "SELECT * FROM Files WHERE parent_ino = ?
 const STMT_QUERY_BY_PARENT_INO_AND_FILENAME: &str =
     "SELECT * FROM Files WHERE parent_ino = ? AND file_name = ?";
 
-const BLOCK_SIZE: u64 = 2 * 1024 * 1024;
-
 const CONFIG_FILE_NAME: &str = ".scfs_config";
 
 const INO_OUTSIDE: u64 = 0;

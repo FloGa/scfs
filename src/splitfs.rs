@@ -13,10 +13,10 @@ use libc::ENOENT;
 use rusqlite::{params, Connection, Error, NO_PARAMS};
 
 use crate::{
-    convert_metadata_to_attr, Config, FileHandle, FileInfo, FileInfoRow, BLOCK_SIZE,
-    CONFIG_FILE_NAME, INO_CONFIG, INO_OUTSIDE, INO_ROOT, STMT_CREATE,
-    STMT_CREATE_INDEX_PARENT_INO_FILE_NAME, STMT_INSERT, STMT_QUERY_BY_INO,
-    STMT_QUERY_BY_PARENT_INO, STMT_QUERY_BY_PARENT_INO_AND_FILENAME, TTL,
+    convert_metadata_to_attr, Config, FileHandle, FileInfo, FileInfoRow, CONFIG_FILE_NAME,
+    INO_CONFIG, INO_OUTSIDE, INO_ROOT, STMT_CREATE, STMT_CREATE_INDEX_PARENT_INO_FILE_NAME,
+    STMT_INSERT, STMT_QUERY_BY_INO, STMT_QUERY_BY_PARENT_INO,
+    STMT_QUERY_BY_PARENT_INO_AND_FILENAME, TTL,
 };
 
 pub struct SplitFS {
@@ -112,7 +112,10 @@ impl SplitFS {
                 .unwrap(),
                 Some(file_info.ino),
             );
-            attr.size = u64::min(BLOCK_SIZE, attr.size - (file_info.part - 1) * BLOCK_SIZE);
+            attr.size = u64::min(
+                self.config.blocksize,
+                attr.size - (file_info.part - 1) * self.config.blocksize,
+            );
             attr
         }
     }
@@ -161,7 +164,7 @@ impl SplitFS {
             .unwrap();
 
         if let FileType::RegularFile = attr.kind {
-            let blocks = f64::ceil(attr.size as f64 / BLOCK_SIZE as f64) as u64;
+            let blocks = f64::ceil(attr.size as f64 / config.blocksize as f64) as u64;
             for i in 0..blocks {
                 let file_name = format!("scfs.{:010}", i).into();
                 let file_info = FileInfoRow::from(FileInfo {
@@ -244,8 +247,8 @@ impl Filesystem for SplitFS {
                 .unwrap()
                 .path;
 
-            let start = (file_info.part - 1) * BLOCK_SIZE;
-            let end = start + BLOCK_SIZE;
+            let start = (file_info.part - 1) * self.config.blocksize;
+            let end = start + self.config.blocksize;
             let fh = time::precise_time_ns();
 
             self.file_handles
