@@ -60,7 +60,7 @@ fn main() {
             let fs = SplitFS::new(mirror);
             unsafe { fuse::spawn_mount(fs, &mountpoint, &options).unwrap() }
         } else {
-            panic!("Unknown mode: {:?}", mode);
+            unreachable!()
         }
     };
 
