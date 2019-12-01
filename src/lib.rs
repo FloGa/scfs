@@ -113,14 +113,15 @@
 //! -   The base directory will be mounted read-only in the new mount point, and
 //!     SCFS expects that the base directory will not be altered while mounted.
 
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::fs::Metadata;
 use std::os::linux::fs::MetadataExt;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::ffi::OsStringExt;
+use std::path::Path;
 
-use fuse::{FileAttr, FileType};
+use fuse::{BackgroundSession, FileAttr, FileType, Filesystem};
 use rusqlite::Row;
 use serde::{Deserialize, Serialize};
 use time::Timespec;
@@ -192,6 +193,18 @@ fn convert_metadata_to_attr(meta: Metadata, ino: Option<u64>) -> FileAttr {
         rdev: meta.st_rdev() as u32,
         flags: 0,
     }
+}
+
+pub fn mount<'a, FS: Filesystem + Send + 'a, P: AsRef<Path>>(
+    filesystem: FS,
+    mountpoint: &P,
+) -> BackgroundSession<'a> {
+    let options = ["-o", "ro", "-o", "fsname=scfs"]
+        .iter()
+        .map(|o| o.as_ref())
+        .collect::<Vec<&OsStr>>();
+
+    unsafe { fuse::spawn_mount(filesystem, &mountpoint, &options).unwrap() }
 }
 
 struct FileHandle {
