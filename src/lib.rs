@@ -215,7 +215,7 @@ struct FileHandle {
     end: u64,
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 struct FileInfo {
     ino: u64,
     parent_ino: u64,
