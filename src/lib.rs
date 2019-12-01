@@ -156,6 +156,8 @@ const STMT_QUERY_BY_PARENT_INO_AND_FILENAME: &str =
 
 const CONFIG_FILE_NAME: &str = ".scfs_config";
 
+pub const CONFIG_DEFAULT_BLOCKSIZE: u64 = 2 * 1024 * 1024;
+
 const INO_OUTSIDE: u64 = 0;
 const INO_ROOT: u64 = 1;
 const INO_CONFIG: u64 = 2;
@@ -311,7 +313,7 @@ impl From<FileInfo> for FileInfoRow {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct Config {
     blocksize: u64,
 }
@@ -320,5 +322,13 @@ impl Config {
     pub fn blocksize(mut self, blocksize: u64) -> Self {
         self.blocksize = blocksize;
         self
+    }
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Config {
+            blocksize: CONFIG_DEFAULT_BLOCKSIZE,
+        }
     }
 }
