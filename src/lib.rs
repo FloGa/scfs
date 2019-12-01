@@ -313,7 +313,7 @@ impl From<FileInfo> for FileInfoRow {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 pub struct Config {
     blocksize: u64,
 }
