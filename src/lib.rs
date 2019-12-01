@@ -332,3 +332,24 @@ impl Default for Config {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn convert_fileinfo_to_fileinforow_and_back() {
+        let file_info = FileInfo {
+            ino: 7,
+            parent_ino: 3,
+            path: OsString::from("File.Name"),
+            file_name: OsString::from("/path/to/files/File.Name"),
+            part: 5,
+            vdir: true,
+        };
+
+        let file_info_row = FileInfoRow::from(file_info.clone());
+
+        assert_eq!(file_info, file_info_row.into());
+    }
+}
