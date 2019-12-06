@@ -12,18 +12,18 @@ depending on the actual cloud storage provider – highly concurrently, while
 big files tend to slow down the whole process. The explanation is simple, many
 cloud storage providers do not support concurrent or chunked uploads of a
 single file, sometimes they would not even support resuming a partial upload.
-You would need to upload it in one go, sequentially byte for byte, it's all or
-nothing.
+You would need to upload it in one go, sequentially one byte at a time, it's
+all or nothing.
 
-Now consider a scenario, where you upload a really big file, like a mirror of
-your Raspberry Pi's SD card with the system and configuration on it. I have
-such a file, it is about 4 GB big. Now, while backing up my system, this was
-the last file to be uploaded. According to ETA calculations, it would have
-taken several hours, so I let it run overnight. The next morning I found out
-that after around 95% of upload process, my internet connection vanished for
-just a few seconds, but long enough that the transfer tool aborted the upload.
-The temporary file got deleted from the cloud storage, so I had to start from
-zero again. Several hours of uploading wasted.
+Now consider a scenario, where you upload a huge file, like a mirror of your
+Raspberry Pi's SD card with the system and configuration on it. I have such a
+file, it is about 4 GB big. Now, while backing up my system, this was the last
+file to be uploaded. According to ETA calculations, it would have taken
+several hours, so I let it run overnight. The next morning I found out that
+after around 95% of upload process, my internet connection vanished for just a
+few seconds, but long enough for the transfer tool to abort the upload. The
+temporary file got deleted from the cloud storage, so I had to start from zero
+again. Several hours of uploading wasted.
 
 I thought of a way to split big files, so that I can upload it more
 efficiently, but I came to the conclusion, that manually splitting files,
@@ -42,7 +42,7 @@ If I download such chunked file parts, I would need to call `cat * >file`
 afterwards to re-create the actual file. This seems like a similar hassle like
 manually splitting files. That's why I had also *CatFS* in mind, when
 developing SCFS. CatFS will concatenate chunked files transparently and
-present them as a complete files.
+present them as complete files again.
 
 CatFS is included in SCFS since version 0.4.0.
 
@@ -71,9 +71,9 @@ The directory specified as `mount point` will now reflect the content of `base
 directory`, replacing each regular file with a directory that contains
 enumerated chunks of that file as separate files.
 
-Since version 0.7.0, it is possible to use a custom blocksize for the splitted
-fragments. For example, to use 1MB chunks instead of the default size of 2MB,
-you would go with:
+Since version 0.7.0, it is possible to use a custom block size for the file
+fragments. For example, to use 1&nbsp;MB chunks instead of the default size of
+2&nbsp;MB, you would go with:
 
     scfs --mode=split --blocksize=1048576 <base directory> <mount point>
 
@@ -100,7 +100,7 @@ Specifically:
     Windows or MacOS.
 
 -   It can only work with directories and regular files. Every other file type
-    will be ignored or may end end up in a `panic!`.
+    will be ignored or may end up in a `panic!`.
 
--   The base directory will be mounted read-only in the new mount point and it
-    is expected that it will not be altered while mounted.
+-   The base directory will be mounted read-only in the new mount point, and
+    SCFS expects that the base directory will not be altered while mounted.
