@@ -164,7 +164,9 @@ impl SplitFS {
             .unwrap();
 
         if let FileType::RegularFile = attr.kind {
-            let blocks = f64::ceil(attr.size as f64 / config.blocksize as f64) as u64;
+            // Create at least one chunk, even if it is empty. This way, we can differentiate
+            // between an empty file and an empty directory.
+            let blocks = 1.max(f64::ceil(attr.size as f64 / config.blocksize as f64) as u64);
             for i in 0..blocks {
                 let file_name = format!("scfs.{:010}", i).into();
                 let file_info = FileInfoRow::from(FileInfo {
