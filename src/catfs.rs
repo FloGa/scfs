@@ -248,6 +248,11 @@ impl Filesystem for CatFS {
         let offset = offset.min(file_size);
         let size = size.min(file_size - offset);
 
+        if size == 0 {
+            reply.data(&[]);
+            return;
+        }
+
         let part_start = offset / self.config.blocksize as usize;
         let part_end = (offset + size) / self.config.blocksize as usize;
 
