@@ -35,6 +35,11 @@
 
 -   Fix off-by-one error
 
+-   Correctly handle empty files
+
+    Create at least one chunk, even if it is empty. This way, we can 
+    differentiate between an empty file and an empty directory.
+
 # Changes in 0.6.1
 
 -   Fix misleading part in the README
