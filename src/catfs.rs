@@ -280,12 +280,12 @@ impl Filesystem for CatFS {
                 .map(|(part, file)| {
                     let mut file = BufReader::new(File::open(file).unwrap());
 
-                    if part == part_start {
-                        file.seek(SeekFrom::Start(offset as u64 % blocksize))
-                            .unwrap();
+                    file.seek(SeekFrom::Start(if part == part_start {
+                        offset as u64 % blocksize
                     } else {
-                        file.seek(SeekFrom::Start(0)).unwrap();
-                    }
+                        0
+                    }))
+                    .unwrap();
 
                     let bytes = file.bytes().map(|b| b.unwrap());
 
