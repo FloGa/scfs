@@ -296,7 +296,6 @@ impl Filesystem for CatFS {
                         } else {
                             blocksize as usize
                         })
-                        .collect::<Vec<_>>()
                 })
                 .flatten()
                 .collect::<Vec<_>>();
