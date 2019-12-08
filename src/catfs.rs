@@ -272,7 +272,6 @@ impl Filesystem for CatFS {
 
         thread::spawn(move || {
             let part_start = 0;
-            let part_end = files.len() - 1;
 
             let bytes = files
                 .iter()
@@ -287,17 +286,10 @@ impl Filesystem for CatFS {
                     }))
                     .unwrap();
 
-                    let bytes = file.bytes().map(|b| b.unwrap());
-
-                    bytes
-                        .take(if part == part_end {
-                            (if part_start == part_end { 0 } else { offset } + size)
-                                % blocksize as usize
-                        } else {
-                            blocksize as usize
-                        })
+                    file.bytes().map(|b| b.unwrap())
                 })
                 .flatten()
+                .take(size)
                 .collect::<Vec<_>>();
 
             reply.data(&bytes);
