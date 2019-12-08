@@ -254,7 +254,7 @@ impl Filesystem for CatFS {
         }
 
         let part_start = offset / self.config.blocksize as usize;
-        let part_end = (offset + size) / self.config.blocksize as usize;
+        let part_end = (offset + size - 1) / self.config.blocksize as usize;
 
         let files = (part_start..=part_end)
             .map(|part| {
