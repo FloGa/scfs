@@ -1,3 +1,50 @@
+# Changes in 0.7.0
+
+-   Make blocksize customizable
+
+    It is now possible to use a custom blocksize in SplitFS. For example, to
+    use 1MB chunks instead of the default size of 2MB, you would go with:
+
+        scfs --mode=split --blocksize=1048576 <base directory> <mount point>
+
+    Where 1048576 is 1024 * 1024, so one megabyte in bytes.
+
+-   Short circuit when reading a size of 0
+
+-   Do not materialize vector after each chunk
+
+    This step was highly unnecessary anyway and it needlessly consumed time
+    and memory. An Iterator can be flattened in the same way, but without
+    the penalty that comes with materializing.
+
+-   Do not calculate size of last chunk to read
+
+    By simply reading `blocksize` bytes and only taking `size` before
+    materializing, we can save a lot of possible mis-calculation regarding
+    the last chunk.
+
+    We make use of two properties here:
+
+    -   Reading after EOF is a no-op, so using a higher number on the
+        reading operation does not hurt.
+
+    -   The reading operations take only place once we materialize the byte
+        array. So even if we issue to read much more bytes than necessary on
+        the last chunk, it will not hurt, since we only `take` the correct
+        number of bytes on materializing.
+
+-   Fix off-by-one error
+
+-   Correctly handle empty files
+
+    Create at least one chunk, even if it is empty. This way, we can
+    differentiate between an empty file and an empty directory.
+
+-   Add test suites to modules
+
+    With automated tests we now can effectively check if new features work
+    as intended and that they do not break existing code.
+
 # Changes in 0.6.1
 
 -   Fix misleading part in the README
@@ -15,7 +62,6 @@
     SplitFS prior. The README didn't reflect this breaking change.
     
     This part is fixed now.
-
 
 # Changes in 0.6.0
 

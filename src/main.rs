@@ -1,13 +1,13 @@
-use std::ffi::OsStr;
 use std::sync::mpsc::channel;
 
-use clap::{crate_authors, crate_description, crate_name, crate_version, App, Arg};
+use clap::{crate_authors, crate_description, crate_name, crate_version, value_t, App, Arg};
 
-use scfs::{CatFS, SplitFS};
+use scfs::{mount, CatFS, Config, SplitFS};
 
 const ARG_MODE: &str = "mode";
 const ARG_MIRROR: &str = "mirror";
 const ARG_MOUNTPOINT: &str = "mountpoint";
+const ARG_BLOCKSIZE: &str = "blocksize";
 
 fn main() {
     let matches = App::new(crate_name!())
@@ -19,9 +19,19 @@ fn main() {
                 .short(&ARG_MODE[0..1])
                 .long(ARG_MODE)
                 .value_name(ARG_MODE.to_uppercase().as_str())
-                .help("Sets the desired mode, split or cat")
+                .help("Sets the desired mode")
                 .takes_value(true)
+                .possible_values(&["split", "cat"])
                 .required(true),
+        )
+        .arg(
+            Arg::with_name(ARG_BLOCKSIZE)
+                .short(&ARG_BLOCKSIZE[0..1])
+                .long(ARG_BLOCKSIZE)
+                .value_name(ARG_BLOCKSIZE.to_uppercase().as_str())
+                .help("Sets the desired blocksize")
+                .takes_value(true)
+                .default_value("2097152"),
         )
         .arg(
             Arg::with_name(ARG_MIRROR)
@@ -39,11 +49,6 @@ fn main() {
     let mirror = matches.value_of_os(ARG_MIRROR).unwrap();
     let mountpoint = matches.value_of_os(ARG_MOUNTPOINT).unwrap();
 
-    let options = ["-o", "ro", "-o", "fsname=scfs"]
-        .iter()
-        .map(|o| o.as_ref())
-        .collect::<Vec<&OsStr>>();
-
     let (tx_quitter, rx_quitter) = channel();
 
     ctrlc::set_handler(move || {
@@ -54,12 +59,14 @@ fn main() {
     let _session = {
         if mode == "cat" {
             let fs = CatFS::new(mirror);
-            unsafe { fuse::spawn_mount(fs, &mountpoint, &options).unwrap() }
+            mount(fs, &mountpoint)
         } else if mode == "split" {
-            let fs = SplitFS::new(mirror);
-            unsafe { fuse::spawn_mount(fs, &mountpoint, &options).unwrap() }
+            let blocksize = value_t!(matches, ARG_BLOCKSIZE, u64).unwrap_or_else(|e| e.exit());
+            let config = Config::default().blocksize(blocksize);
+            let fs = SplitFS::new(mirror, config);
+            mount(fs, &mountpoint)
         } else {
-            panic!("Unknown mode: {:?}", mode);
+            unreachable!()
         }
     };
 
