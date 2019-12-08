@@ -37,8 +37,13 @@
 
 -   Correctly handle empty files
 
-    Create at least one chunk, even if it is empty. This way, we can 
+    Create at least one chunk, even if it is empty. This way, we can
     differentiate between an empty file and an empty directory.
+
+-   Add test suites to modules
+
+    With automated tests we now can effectively check if new features work
+    as intended and that they do not break existing code.
 
 # Changes in 0.6.1
 
