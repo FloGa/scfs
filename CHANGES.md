@@ -9,6 +9,11 @@
 
     Where 1048576 is 1024 * 1024, so one megabyte in bytes.
 
+-   Correctly handle empty files
+
+    Create at least one chunk, even if it is empty. This way, we can 
+    differentiate between an empty file and an empty directory.
+
 # Changes in 0.6.1
 
 -   Fix misleading part in the README
