@@ -1,9 +1,8 @@
-use std::ffi::OsStr;
 use std::sync::mpsc::channel;
 
 use clap::{crate_authors, crate_description, crate_name, crate_version, value_t, App, Arg};
 
-use scfs::{CatFS, Config, SplitFS};
+use scfs::{mount, CatFS, Config, SplitFS};
 
 const ARG_MODE: &str = "mode";
 const ARG_MIRROR: &str = "mirror";
@@ -50,11 +49,6 @@ fn main() {
     let mirror = matches.value_of_os(ARG_MIRROR).unwrap();
     let mountpoint = matches.value_of_os(ARG_MOUNTPOINT).unwrap();
 
-    let options = ["-o", "ro", "-o", "fsname=scfs"]
-        .iter()
-        .map(|o| o.as_ref())
-        .collect::<Vec<&OsStr>>();
-
     let (tx_quitter, rx_quitter) = channel();
 
     ctrlc::set_handler(move || {
@@ -65,12 +59,12 @@ fn main() {
     let _session = {
         if mode == "cat" {
             let fs = CatFS::new(mirror);
-            unsafe { fuse::spawn_mount(fs, &mountpoint, &options).unwrap() }
+            mount(fs, &mountpoint)
         } else if mode == "split" {
             let blocksize = value_t!(matches, ARG_BLOCKSIZE, u64).unwrap_or_else(|e| e.exit());
             let config = Config::default().blocksize(blocksize);
             let fs = SplitFS::new(mirror, config);
-            unsafe { fuse::spawn_mount(fs, &mountpoint, &options).unwrap() }
+            mount(fs, &mountpoint)
         } else {
             unreachable!()
         }

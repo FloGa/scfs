@@ -415,3 +415,443 @@ impl Filesystem for SplitFS {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::io::Write;
+
+    use fuse::BackgroundSession;
+    use rand::{Rng, RngCore};
+    use tempfile::{tempdir, TempDir};
+
+    use crate::mount;
+
+    use super::*;
+
+    // Helper struct to keep necessary variables in scope. To not make the compiler complain,
+    // prefix them with an underscore. If for example the TempDir variables are not kept in scope
+    // this way, the directories would be deleted before the tests can be run.
+    struct TempSession<'a> {
+        _session: BackgroundSession<'a>,
+        _mirror: TempDir,
+        pub(crate) mountpoint: TempDir,
+    }
+
+    fn mount_and_create_files<'a>(
+        files: Vec<(String, Vec<u8>)>,
+        config: Option<Config>,
+    ) -> Result<(TempSession<'a>), std::io::Error> {
+        let mirror = tempdir()?;
+        let mountpoint = tempdir()?;
+
+        for (file_name, data) in files {
+            let path = mirror.path().join(file_name);
+            fs::create_dir_all(path.parent().unwrap())?;
+            let mut file = File::create(&path)?;
+            file.write_all(&data)?;
+        }
+
+        let fs = SplitFS::new(mirror.path().as_os_str(), config.unwrap_or_default());
+
+        let session = mount(fs, &mountpoint);
+
+        Ok(TempSession {
+            _mirror: mirror,
+            mountpoint,
+            _session: session,
+        })
+    }
+
+    fn mount_and_create_seq_files<'a>(
+        num_files: usize,
+        config: Option<Config>,
+    ) -> Result<(TempSession<'a>), std::io::Error> {
+        let files = (0..num_files)
+            .map(|i| {
+                let i_as_string = format!("{}", i);
+                (i_as_string.clone(), i_as_string.into_bytes())
+            })
+            .collect::<Vec<_>>();
+
+        mount_and_create_files(files, config)
+    }
+
+    #[test]
+    fn test_empty_mirror() -> Result<(), std::io::Error> {
+        // Even with an empty mirror, there will be at least one file, namely the virtual config
+        // file, with a default Config struct as content
+
+        let session = mount_and_create_seq_files(0, None)?;
+
+        let entries = fs::read_dir(&session.mountpoint)?
+            .map(|entry| entry.unwrap())
+            .collect::<Vec<_>>();
+
+        assert_eq!(entries.len(), 1);
+
+        let file = entries.get(0).unwrap();
+
+        assert_eq!(file.file_name(), CONFIG_FILE_NAME);
+
+        assert_eq!(
+            fs::read_to_string(file.path())?,
+            serde_json::to_string(&Config::default())?
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_empty_mirror_custom_config() -> Result<(), std::io::Error> {
+        // Even with an empty mirror, there will be at least one file, namely the virtual config
+        // file, with the custom Config struct as content
+
+        let config = Config::default().blocksize(1);
+
+        let session = mount_and_create_seq_files(0, Some(config))?;
+
+        let entries = fs::read_dir(&session.mountpoint)?
+            .map(|entry| entry.unwrap())
+            .collect::<Vec<_>>();
+
+        assert_eq!(entries.len(), 1);
+
+        let file = entries.get(0).unwrap();
+
+        assert_eq!(file.file_name(), CONFIG_FILE_NAME);
+
+        assert_eq!(
+            fs::read_to_string(file.path())?,
+            serde_json::to_string(&config)?
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_empty_file() -> Result<(), std::io::Error> {
+        let files = vec![("empty_file".to_string(), vec![])];
+
+        let session = mount_and_create_files(files, None)?;
+
+        let entries = fs::read_dir(&session.mountpoint)?
+            .map(|entry| entry.unwrap())
+            .collect::<Vec<_>>();
+
+        assert_eq!(entries.len(), 1 + 1);
+
+        assert_eq!(
+            entries
+                .iter()
+                .filter(|item| item.file_name() == CONFIG_FILE_NAME)
+                .count(),
+            1
+        );
+
+        let dirs = entries
+            .iter()
+            .filter(|item| item.path().is_dir())
+            .collect::<Vec<_>>();
+
+        assert_eq!(dirs.len(), 1);
+
+        let files = dirs
+            .iter()
+            .map(|item| {
+                let file_name = item.file_name().into_string().unwrap();
+                let files = fs::read_dir(item.path())
+                    .unwrap()
+                    .map(|entry| entry.unwrap().path())
+                    .collect::<Vec<_>>();
+                (file_name, files)
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            files.iter().filter(|&(_, files)| files.len() == 1).count(),
+            1
+        );
+
+        assert_eq!(
+            files
+                .iter()
+                .filter(|&(_, files)| {
+                    let contents = files
+                        .iter()
+                        .flat_map(|entry| fs::read(entry).unwrap())
+                        .collect::<Vec<_>>();
+                    contents.is_empty()
+                })
+                .count(),
+            1
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_100_small_files() -> Result<(), std::io::Error> {
+        // With an mirror containing 100 small files, there should be 101 entries in the
+        // mountpoint: The config file and 100 folders representing the files. Each folder should
+        // contain a single part with the file contents, which are equal to the file name.
+
+        let num_files = 100;
+
+        let session = mount_and_create_seq_files(num_files, None)?;
+
+        let entries = fs::read_dir(&session.mountpoint)?
+            .map(|entry| entry.unwrap())
+            .collect::<Vec<_>>();
+
+        assert_eq!(entries.len(), num_files + 1);
+
+        assert_eq!(
+            entries
+                .iter()
+                .filter(|item| item.file_name() == CONFIG_FILE_NAME)
+                .count(),
+            1
+        );
+
+        let dirs = entries
+            .iter()
+            .filter(|item| item.path().is_dir())
+            .collect::<Vec<_>>();
+
+        assert_eq!(dirs.len(), num_files);
+
+        let files = dirs
+            .iter()
+            .map(|item| {
+                let file_name = item.file_name().into_string().unwrap();
+                let files = fs::read_dir(item.path())
+                    .unwrap()
+                    .map(|entry| entry.unwrap().path())
+                    .collect::<Vec<_>>();
+                (file_name, files)
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            files.iter().filter(|&(_, files)| files.len() == 1).count(),
+            num_files
+        );
+
+        assert_eq!(
+            files
+                .iter()
+                .filter(|&(file_name, files)| {
+                    let contents = files
+                        .iter()
+                        .flat_map(|entry| fs::read(entry).unwrap())
+                        .collect::<Vec<_>>();
+                    file_name.clone().into_bytes() == contents
+                })
+                .count(),
+            num_files
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_100_small_files_in_subfolders() -> Result<(), std::io::Error> {
+        // Same as above, but with multiple nested folders.
+
+        let num_files = 100;
+
+        let mut rng = rand::thread_rng();
+        let files = (0..num_files)
+            .map(|i| {
+                let file_name = format!(
+                    "{}/{}/{}/{}/{}/{}",
+                    i,
+                    rng.gen::<u32>(),
+                    rng.gen::<u32>(),
+                    rng.gen::<u32>(),
+                    rng.gen::<u32>(),
+                    rng.gen::<u32>()
+                );
+                let content = format!("{}", i,);
+                (file_name, content.into_bytes())
+            })
+            .collect::<Vec<_>>();
+
+        let session = mount_and_create_files(files, None)?;
+
+        let entries = fs::read_dir(&session.mountpoint)?
+            .map(|entry| entry.unwrap())
+            .collect::<Vec<_>>();
+
+        assert_eq!(entries.len(), num_files + 1);
+
+        assert_eq!(
+            entries
+                .iter()
+                .filter(|item| item.file_name() == CONFIG_FILE_NAME)
+                .count(),
+            1
+        );
+
+        let dirs = entries
+            .iter()
+            .filter(|item| item.path().is_dir())
+            .collect::<Vec<_>>();
+
+        assert_eq!(dirs.len(), num_files);
+
+        let files = dirs
+            .iter()
+            .map(|item| {
+                let file_name = item.file_name().into_string().unwrap();
+                let files = fs::read_dir(item.path())
+                    .unwrap()
+                    .map(|entry| {
+                        let mut path = entry.unwrap().path();
+                        while path.is_dir() {
+                            path = path.read_dir().unwrap().next().unwrap().unwrap().path();
+                        }
+                        path.to_path_buf()
+                    })
+                    .collect::<Vec<_>>();
+                (file_name, files)
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            files.iter().filter(|&(_, files)| files.len() == 1).count(),
+            num_files
+        );
+
+        assert_eq!(
+            files
+                .iter()
+                .filter(|&(file_name, files)| {
+                    let contents = files
+                        .iter()
+                        .flat_map(|entry| fs::read(entry).unwrap())
+                        .collect::<Vec<_>>();
+                    file_name.clone().into_bytes() == contents
+                })
+                .count(),
+            num_files
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_big_file_bytewise() -> Result<(), std::io::Error> {
+        // A big file, with a block size of 1 byte, should be splitted in as many parts as bytes.
+        // By concatenating all parts together, the original content should be created.
+
+        let config = Config::default().blocksize(1);
+
+        let mut data = [0u8; 100];
+        rand::thread_rng().fill_bytes(&mut data);
+        let data = data.to_vec();
+
+        let files = vec![("huge_file".to_string(), data.clone())];
+
+        let session = mount_and_create_files(files, Some(config))?;
+
+        let entries = fs::read_dir(&session.mountpoint)?
+            .map(|entry| entry.unwrap())
+            .collect::<Vec<_>>();
+
+        assert_eq!(entries.len(), 1 + 1);
+
+        let dirs = entries
+            .iter()
+            .filter(|item| item.path().is_dir())
+            .collect::<Vec<_>>();
+
+        assert_eq!(dirs.len(), 1);
+
+        let dir = dirs.get(0).unwrap();
+
+        let files = fs::read_dir(dir.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect::<Vec<_>>();
+
+        assert_eq!(files.len(), data.len());
+
+        assert_eq!(
+            files
+                .iter()
+                .flat_map(|file| fs::read(file).unwrap())
+                .collect::<Vec<_>>(),
+            data
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_big_file_blockwise() -> Result<(), std::io::Error> {
+        // A big file, with a custom block size, should be splitted in as many parts as needed so
+        // that the parts are no larger than the block size. By concatenating all parts together,
+        // the original content should be created.
+
+        let blocksize = 37;
+
+        let config = Config::default().blocksize(blocksize);
+
+        let mut data = [0u8; 100];
+        rand::thread_rng().fill_bytes(&mut data);
+        let data = data.to_vec();
+
+        let files = vec![("huge_file".to_string(), data.clone())];
+
+        let session = mount_and_create_files(files, Some(config))?;
+
+        let entries = fs::read_dir(&session.mountpoint)?
+            .map(|entry| entry.unwrap())
+            .collect::<Vec<_>>();
+
+        assert_eq!(entries.len(), 1 + 1);
+
+        let dirs = entries
+            .iter()
+            .filter(|item| item.path().is_dir())
+            .collect::<Vec<_>>();
+
+        assert_eq!(dirs.len(), 1);
+
+        let dir = dirs.get(0).unwrap();
+
+        let files = fs::read_dir(dir.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            files.len(),
+            (data.len() as f32 / blocksize as f32).ceil() as usize
+        );
+
+        assert_eq!(
+            files
+                .iter()
+                .filter(|item| File::open(item).unwrap().bytes().count() == blocksize as usize)
+                .count(),
+            files.len() - 1
+        );
+
+        assert_eq!(
+            File::open(files.last().unwrap()).unwrap().bytes().count(),
+            data.len() % blocksize as usize
+        );
+
+        assert_eq!(
+            files
+                .iter()
+                .flat_map(|file| fs::read(file).unwrap())
+                .collect::<Vec<_>>(),
+            data
+        );
+
+        Ok(())
+    }
+}
