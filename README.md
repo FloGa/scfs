@@ -85,6 +85,10 @@ scfs --mode=split --blocksize=1048576 <base directory> <mount point>
 
 Where 1048576 is 1024 * 1024, so one megabyte in bytes.
 
+You can actually go as far as to set a block size of one byte, but be prepared
+for a ridiculous amount of overhead or maybe even a system freeze because the
+metadata table grows too large.
+
 ### CatFS
 
 To mount a directory with CatFS, use the following form:
