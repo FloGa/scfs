@@ -398,3 +398,237 @@ impl Filesystem for CatFS {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::io::Write;
+    use std::iter;
+    use std::ops::Deref;
+
+    use fuse::BackgroundSession;
+    use rand::{thread_rng, Rng, RngCore};
+    use tempfile::{tempdir, TempDir};
+
+    use crate::mount;
+
+    use super::*;
+
+    // Helper struct to keep necessary variables in scope. To not make the compiler complain,
+    // prefix them with an underscore. If for example the TempDir variables are not kept in scope
+    // this way, the directories would be deleted before the tests can be run.
+    struct TempSession<'a> {
+        _session: BackgroundSession<'a>,
+        _mirror: TempDir,
+        pub(crate) mountpoint: TempDir,
+    }
+
+    fn mount_and_create_files<'a>(
+        files: &Vec<(String, Vec<u8>)>,
+    ) -> Result<(TempSession<'a>), std::io::Error> {
+        let mirror = tempdir()?;
+        let mountpoint = tempdir()?;
+
+        for (file_name, data) in files {
+            let path = mirror.path().join(file_name);
+            fs::create_dir_all(path.parent().unwrap())?;
+            let mut file = File::create(&path)?;
+            file.write_all(&data)?;
+        }
+
+        let fs = CatFS::new(mirror.path().as_os_str());
+
+        let session = mount(fs, &mountpoint);
+
+        Ok(TempSession {
+            _mirror: mirror,
+            mountpoint,
+            _session: session,
+        })
+    }
+
+    fn create_random_file_tuples(
+        blocksize: usize,
+        num_files: usize,
+        max_num_fragments: usize,
+    ) -> Vec<(String, Vec<u8>)> {
+        let mut rng = thread_rng();
+
+        (0..num_files)
+            .flat_map(|file_num| {
+                let max_num_fragments = rng.gen_range(1, max_num_fragments);
+                (0..max_num_fragments)
+                    .map(|fragment_num| {
+                        let file_name = format!("file_{}/scfs.{:010}", file_num, fragment_num);
+
+                        let fragment_size = if fragment_num == max_num_fragments - 1 && rng.gen() {
+                            rng.gen_range(1, blocksize + 1)
+                        } else {
+                            blocksize
+                        };
+
+                        let mut content = vec![0u8; fragment_size];
+                        rng.fill_bytes(&mut content);
+
+                        (file_name, content)
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>()
+    }
+
+    fn create_config_file_tuple(config: Option<Config>) -> (String, Vec<u8>) {
+        (
+            CONFIG_FILE_NAME.to_string(),
+            serde_json::to_vec(&config.unwrap_or_default()).unwrap(),
+        )
+    }
+
+    fn with_config_file(files: Vec<(String, Vec<u8>)>, config: Config) -> Vec<(String, Vec<u8>)> {
+        files
+            .into_iter()
+            .chain(iter::once(create_config_file_tuple(Some(config))))
+            .collect()
+    }
+
+    fn check_files(
+        mountpoint: &Path,
+        files_expected: Vec<(String, Vec<u8>)>,
+    ) -> Result<(), std::io::Error> {
+        let files_actual = fs::read_dir(mountpoint)?
+            .map(|entry| entry.unwrap().path())
+            .collect::<Vec<_>>();
+
+        for (file_name, content) in &files_expected {
+            println!("{}: {}", file_name, content.len());
+        }
+
+        let mut files_expected_map = HashMap::new();
+        for (file_name, content_chunk) in files_expected {
+            if file_name == CONFIG_FILE_NAME {
+                continue;
+            }
+
+            let file_name = mountpoint.join(file_name).parent().unwrap().to_path_buf();
+            let content = files_expected_map.entry(file_name).or_insert(Vec::new());
+            for c in content_chunk {
+                content.push(c)
+            }
+        }
+
+        assert_eq!(files_actual.len(), files_expected_map.len());
+
+        for file in files_actual {
+            let content_actual = fs::read(&file).unwrap();
+            let content_actual = content_actual.deref();
+
+            let content_expected = files_expected_map.get(&file).unwrap();
+            let content_expected = content_expected.deref();
+
+            assert_eq!(content_actual, content_expected)
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    #[should_panic(expected = "SCFS config file not found")]
+    fn test_empty_mirror() {
+        // Since a valid SplitFS needs a config file, panic if there is no such file
+
+        let session = mount_and_create_files(&vec![]).unwrap();
+
+        let entries = fs::read_dir(&session.mountpoint)
+            .unwrap()
+            .map(|entry| entry.unwrap())
+            .collect::<Vec<_>>();
+
+        assert_eq!(entries.len(), 0);
+    }
+
+    #[test]
+    fn test_empty_mirror_with_config() -> Result<(), std::io::Error> {
+        // If there is a valid config file, but nothing else, then the CatFS mountpoint is
+        // completely empty.
+
+        let files = vec![create_config_file_tuple(None)];
+
+        let session = mount_and_create_files(&files)?;
+
+        let entries = fs::read_dir(&session.mountpoint)?
+            .map(|entry| entry.unwrap())
+            .collect::<Vec<_>>();
+
+        assert_eq!(entries.len(), 0);
+
+        Ok(())
+    }
+
+    #[test]
+    #[should_panic(expected = "SCFS config file contains invalid JSON")]
+    fn test_empty_mirror_with_wrong_config() {
+        // An invalid config file must result in a panic
+
+        let files = vec![(CONFIG_FILE_NAME.to_string(), "{}".into())];
+
+        let session = mount_and_create_files(&files).unwrap();
+
+        let entries = fs::read_dir(&session.mountpoint)
+            .unwrap()
+            .map(|entry| entry.unwrap())
+            .collect::<Vec<_>>();
+
+        assert_eq!(entries.len(), 0);
+    }
+
+    #[test]
+    fn test_blocksize_1() -> Result<(), std::io::Error> {
+        let config = Config::default().blocksize(1);
+        let blocksize = config.blocksize as usize;
+        let num_files = 50;
+        let max_num_fragments = 100;
+
+        let files_expected = with_config_file(
+            create_random_file_tuples(blocksize, num_files, max_num_fragments),
+            config,
+        );
+
+        let session = mount_and_create_files(&files_expected)?;
+
+        check_files(session.mountpoint.path(), files_expected)
+    }
+
+    #[test]
+    fn test_blocksize_1kb() -> Result<(), std::io::Error> {
+        let config = Config::default().blocksize(1024);
+        let blocksize = config.blocksize as usize;
+        let num_files = 20;
+        let max_num_fragments = 10;
+
+        let files_expected = with_config_file(
+            create_random_file_tuples(blocksize, num_files, max_num_fragments),
+            config,
+        );
+
+        let session = mount_and_create_files(&files_expected)?;
+
+        check_files(session.mountpoint.path(), files_expected)
+    }
+
+    #[test]
+    #[ignore]
+    fn test_expensive_blocksize_default() -> Result<(), std::io::Error> {
+        let config = Config::default();
+        let blocksize = config.blocksize as usize;
+        let num_files = 10;
+        let max_num_fragments = 5;
+
+        let files_expected = with_config_file(
+            create_random_file_tuples(blocksize, num_files, max_num_fragments),
+            config,
+        );
+
+        let session = mount_and_create_files(&files_expected)?;
+
+        check_files(session.mountpoint.path(), files_expected)
+    }
+}
