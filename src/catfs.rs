@@ -526,10 +526,6 @@ mod tests {
             .map(|entry| entry.unwrap().path())
             .collect::<Vec<_>>();
 
-        for (file_name, content) in &files_expected {
-            println!("{}: {}", file_name, content.len());
-        }
-
         let mut files_expected_map = HashMap::new();
         for (file_name, content_chunk) in files_expected {
             if file_name == CONFIG_FILE_NAME {
