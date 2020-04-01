@@ -1,5 +1,14 @@
 # Changes since latest release
 
+-   Implement readlink
+
+-   Correctly handle symlinks
+
+-   Replace each metadata with symlink_metadata
+
+    Symlinks should be presented as-is, so it should never be necessary to
+    traverse them.
+
 # Changes in 0.7.0
 
 -   Make blocksize customizable
