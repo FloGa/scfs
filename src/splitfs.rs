@@ -13,10 +13,10 @@ use libc::ENOENT;
 use rusqlite::{params, Connection, Error, NO_PARAMS};
 
 use crate::{
-    convert_metadata_to_attr, Config, FileHandle, FileInfo, FileInfoRow, CONFIG_FILE_NAME,
-    INO_CONFIG, INO_OUTSIDE, INO_ROOT, STMT_CREATE, STMT_CREATE_INDEX_PARENT_INO_FILE_NAME,
-    STMT_INSERT, STMT_QUERY_BY_INO, STMT_QUERY_BY_PARENT_INO,
-    STMT_QUERY_BY_PARENT_INO_AND_FILENAME, TTL,
+    convert_filetype, convert_metadata_to_attr, Config, FileHandle, FileInfo, FileInfoRow,
+    CONFIG_FILE_NAME, INO_CONFIG, INO_OUTSIDE, INO_ROOT, STMT_CREATE,
+    STMT_CREATE_INDEX_PARENT_INO_FILE_NAME, STMT_INSERT, STMT_QUERY_BY_INO,
+    STMT_QUERY_BY_PARENT_INO, STMT_QUERY_BY_PARENT_INO_AND_FILENAME, TTL,
 };
 
 pub struct SplitFS {
@@ -139,7 +139,13 @@ impl SplitFS {
     fn populate<P: AsRef<Path>>(file_db: &Connection, path: P, config: &Config, parent_ino: u64) {
         let path = path.as_ref();
 
-        let mut attr = convert_metadata_to_attr(path.symlink_metadata().unwrap(), None);
+        let meta = path.symlink_metadata().unwrap();
+
+        if let None = convert_filetype(meta.file_type()) {
+            return;
+        }
+
+        let mut attr = convert_metadata_to_attr(meta, None);
 
         attr.ino = if parent_ino == INO_OUTSIDE {
             INO_ROOT
