@@ -417,6 +417,7 @@ mod tests {
     use std::io::Write;
     use std::iter;
     use std::ops::Deref;
+    use std::os::unix::fs::symlink;
 
     use fuse::BackgroundSession;
     use rand::{thread_rng, Rng, RngCore};
@@ -435,8 +436,9 @@ mod tests {
         pub(crate) mountpoint: TempDir,
     }
 
-    fn mount_and_create_files<'a>(
+    fn mount_and_create_files_with_symlinks<'a>(
         files: &Vec<(String, Vec<u8>)>,
+        symlinks: Vec<(String, String)>,
     ) -> Result<(TempSession<'a>), std::io::Error> {
         let mirror = tempdir()?;
         let mountpoint = tempdir()?;
@@ -448,6 +450,10 @@ mod tests {
             file.write_all(&data)?;
         }
 
+        for (link_name, target) in symlinks {
+            symlink(&target, mirror.path().join(&link_name))?;
+        }
+
         let fs = CatFS::new(mirror.path().as_os_str());
 
         let session = mount(fs, &mountpoint);
@@ -457,6 +463,12 @@ mod tests {
             mountpoint,
             _session: session,
         })
+    }
+
+    fn mount_and_create_files<'a>(
+        files: &Vec<(String, Vec<u8>)>,
+    ) -> Result<(TempSession<'a>), std::io::Error> {
+        mount_and_create_files_with_symlinks(files, Vec::new())
     }
 
     fn create_random_file_tuples(
@@ -548,7 +560,7 @@ mod tests {
     fn test_empty_mirror() {
         // Since a valid SplitFS needs a config file, panic if there is no such file
 
-        let session = mount_and_create_files(&vec![]).unwrap();
+        let session = mount_and_create_files(&Vec::new()).unwrap();
 
         let entries = fs::read_dir(&session.mountpoint)
             .unwrap()
@@ -643,5 +655,150 @@ mod tests {
         let session = mount_and_create_files(&files_expected)?;
 
         check_files(session.mountpoint.path(), files_expected)
+    }
+
+    #[test]
+    fn test_symlink_relative_file() -> Result<(), std::io::Error> {
+        // A symlink should just be presented as such. A
+        // relative symlink pointing to a file inside the chunked directory should translate into
+        // the same concatenated file as the real file.
+
+        let config = Config::default().blocksize(1);
+        let blocksize = config.blocksize as usize;
+        let num_files = 1;
+        let max_num_fragments = 5;
+
+        let files = with_config_file(
+            create_random_file_tuples(blocksize, num_files, max_num_fragments),
+            config,
+        );
+
+        let mut symlink_map = HashMap::new();
+        symlink_map.insert(
+            "link_rel".into(),
+            files.first().unwrap().0.split("/").next().unwrap().into(),
+        );
+
+        let session = mount_and_create_files_with_symlinks(
+            &files,
+            symlink_map.clone().into_iter().collect(),
+        )?;
+
+        let entries = fs::read_dir(&session.mountpoint)?
+            .map(|entry| entry.unwrap())
+            .collect::<Vec<_>>();
+
+        assert_eq!(entries.len(), num_files + symlink_map.len());
+
+        let symlinks_found = entries
+            .iter()
+            .filter(|item| item.file_type().unwrap().is_symlink())
+            .collect::<Vec<_>>();
+
+        assert_eq!(symlinks_found.len(), symlink_map.len());
+
+        let contents = entries
+            .iter()
+            .map(|file| fs::read(file.path()).unwrap())
+            .collect::<Vec<_>>();
+
+        assert!(contents
+            .iter()
+            .all(|content| content.eq(contents.first().unwrap())));
+
+        for symlink in symlinks_found {
+            let symlink = symlink.path();
+            let link_name = symlink.file_name().unwrap().to_str().unwrap();
+            let target = symlink_map.remove(link_name);
+            assert_ne!(target, None);
+            let target = target.unwrap();
+            assert_eq!(fs::read_link(symlink)?.to_str().unwrap(), target);
+        }
+
+        assert!(symlink_map.is_empty());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_symlink_absolute_dir() -> Result<(), std::io::Error> {
+        // A symlink should just be presented as such.
+
+        let mut symlink_map = HashMap::new();
+        symlink_map.insert("link_abs".into(), "/".into());
+
+        let session = mount_and_create_files_with_symlinks(
+            &with_config_file(Vec::new(), Config::default()),
+            symlink_map.clone().into_iter().collect(),
+        )?;
+
+        let entries = fs::read_dir(&session.mountpoint)?
+            .map(|entry| entry.unwrap())
+            .collect::<Vec<_>>();
+
+        assert_eq!(entries.len(), symlink_map.len());
+
+        let symlinks_found = entries
+            .iter()
+            .filter(|item| item.file_type().unwrap().is_symlink())
+            .collect::<Vec<_>>();
+
+        assert_eq!(symlinks_found.len(), symlink_map.len());
+
+        assert!(symlinks_found.first().unwrap().path().is_dir());
+
+        for symlink in symlinks_found {
+            let symlink = symlink.path();
+            let link_name = symlink.file_name().unwrap().to_str().unwrap();
+            let target = symlink_map.remove(link_name);
+            assert_ne!(target, None);
+            let target = target.unwrap();
+            assert_eq!(fs::read_link(symlink)?.to_str().unwrap(), target);
+        }
+
+        assert!(symlink_map.is_empty());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_symlink_broken() -> Result<(), std::io::Error> {
+        // A symlink should just be presented as such. If
+        // the target does not exist, just show a broken symlink, do not panic out.
+
+        let mut symlink_map = HashMap::new();
+        symlink_map.insert("link_rel".into(), "a/b/c".into());
+        symlink_map.insert("link_abs".into(), "/home/nobody/nothing".into());
+
+        let session = mount_and_create_files_with_symlinks(
+            &with_config_file(Vec::new(), Config::default()),
+            symlink_map.clone().into_iter().collect(),
+        )?;
+
+        let entries = fs::read_dir(&session.mountpoint)?
+            .map(|entry| entry.unwrap())
+            .collect::<Vec<_>>();
+
+        assert_eq!(entries.len(), symlink_map.len());
+
+        let symlinks_found = entries
+            .iter()
+            .filter(|item| item.file_type().unwrap().is_symlink())
+            .collect::<Vec<_>>();
+
+        assert_eq!(symlinks_found.len(), symlink_map.len());
+
+        for symlink in symlinks_found {
+            let symlink = symlink.path();
+            let link_name = symlink.file_name().unwrap().to_str().unwrap();
+            let target = symlink_map.remove(link_name);
+            assert_ne!(target, None);
+            let target = target.unwrap();
+            assert_eq!(fs::read_link(symlink)?.to_str().unwrap(), target);
+        }
+
+        assert!(symlink_map.is_empty());
+
+        Ok(())
     }
 }

@@ -441,7 +441,9 @@ impl Filesystem for SplitFS {
 
 #[cfg(test)]
 mod tests {
+    use std::fs::read;
     use std::io::Write;
+    use std::os::unix::fs::symlink;
 
     use fuse::BackgroundSession;
     use rand::{Rng, RngCore};
@@ -460,8 +462,9 @@ mod tests {
         pub(crate) mountpoint: TempDir,
     }
 
-    fn mount_and_create_files<'a>(
+    fn mount_and_create_files_with_symlinks<'a>(
         files: Vec<(String, Vec<u8>)>,
+        symlinks: Vec<(String, String)>,
         config: Option<Config>,
     ) -> Result<(TempSession<'a>), std::io::Error> {
         let mirror = tempdir()?;
@@ -474,6 +477,10 @@ mod tests {
             file.write_all(&data)?;
         }
 
+        for (link_name, target) in symlinks {
+            symlink(&target, mirror.path().join(&link_name))?;
+        }
+
         let fs = SplitFS::new(mirror.path().as_os_str(), config.unwrap_or_default());
 
         let session = mount(fs, &mountpoint);
@@ -483,6 +490,13 @@ mod tests {
             mountpoint,
             _session: session,
         })
+    }
+
+    fn mount_and_create_files<'a>(
+        files: Vec<(String, Vec<u8>)>,
+        config: Option<Config>,
+    ) -> Result<(TempSession<'a>), std::io::Error> {
+        mount_and_create_files_with_symlinks(files, Vec::new(), config)
     }
 
     fn mount_and_create_seq_files<'a>(
@@ -874,6 +888,228 @@ mod tests {
                 .collect::<Vec<_>>(),
             data
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_symlink_relative_file() -> Result<(), std::io::Error> {
+        // A symlink should just be presented as such, no splitting or any other modification.
+
+        let mut symlink_map = HashMap::new();
+        symlink_map.insert("link_rel".into(), CONFIG_FILE_NAME.into());
+
+        let session = mount_and_create_files_with_symlinks(
+            Vec::new(),
+            symlink_map.clone().into_iter().collect(),
+            None,
+        )?;
+
+        let entries = fs::read_dir(&session.mountpoint)?
+            .map(|entry| entry.unwrap())
+            .collect::<Vec<_>>();
+
+        assert_eq!(entries.len(), symlink_map.len() + 1);
+
+        assert_eq!(
+            entries
+                .iter()
+                .filter(|item| item.file_name() == CONFIG_FILE_NAME)
+                .count(),
+            1
+        );
+
+        let symlinks_found = entries
+            .iter()
+            .filter(|item| item.file_type().unwrap().is_symlink())
+            .collect::<Vec<_>>();
+
+        assert_eq!(symlinks_found.len(), symlink_map.len());
+
+        assert_eq!(
+            read(symlinks_found.first().unwrap().path())?,
+            serde_json::to_string(&Config::default())
+                .unwrap()
+                .into_bytes()
+        );
+
+        for symlink in symlinks_found {
+            let symlink = symlink.path();
+            let link_name = symlink.file_name().unwrap().to_str().unwrap();
+            let target = symlink_map.remove(link_name);
+            assert_ne!(target, None);
+            let target = target.unwrap();
+            assert_eq!(fs::read_link(symlink)?.to_str().unwrap(), target);
+        }
+
+        assert!(symlink_map.is_empty());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_symlink_relative_vdir() -> Result<(), std::io::Error> {
+        // A symlink should just be presented as such, no splitting or any other modification. A
+        // relative symlink pointing to a file inside the chunked directory should translate into
+        // the same chunked virtual directory as the real file's counterpart.
+
+        let files = vec![(String::from("a/b/c"), String::from("42").into_bytes())];
+
+        let mut symlink_map = HashMap::new();
+        symlink_map.insert("link_rel".into(), "a/b/c".into());
+
+        let session = mount_and_create_files_with_symlinks(
+            files.clone(),
+            symlink_map.clone().into_iter().collect(),
+            None,
+        )?;
+
+        let entries = fs::read_dir(&session.mountpoint)?
+            .map(|entry| entry.unwrap())
+            .collect::<Vec<_>>();
+
+        assert_eq!(entries.len(), files.len() + symlink_map.len() + 1);
+
+        assert_eq!(
+            entries
+                .iter()
+                .filter(|item| item.file_name() == CONFIG_FILE_NAME)
+                .count(),
+            1
+        );
+
+        let symlinks_found = entries
+            .iter()
+            .filter(|item| item.file_type().unwrap().is_symlink())
+            .collect::<Vec<_>>();
+
+        assert_eq!(symlinks_found.len(), symlink_map.len());
+
+        let parts = symlinks_found
+            .first()
+            .unwrap()
+            .path()
+            .read_dir()
+            .unwrap()
+            .collect::<Vec<_>>();
+
+        assert_eq!(parts.len(), 1);
+
+        assert_eq!(
+            read(parts.first().unwrap().as_ref().unwrap().path())?,
+            files.first().unwrap().1
+        );
+
+        for symlink in symlinks_found {
+            let symlink = symlink.path();
+            let link_name = symlink.file_name().unwrap().to_str().unwrap();
+            let target = symlink_map.remove(link_name);
+            assert_ne!(target, None);
+            let target = target.unwrap();
+            assert_eq!(fs::read_link(symlink)?.to_str().unwrap(), target);
+        }
+
+        assert!(symlink_map.is_empty());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_symlink_absolute_dir() -> Result<(), std::io::Error> {
+        // A symlink should just be presented as such, no splitting or any other modification.
+
+        let mut symlink_map = HashMap::new();
+        symlink_map.insert("link_abs".into(), "/".into());
+
+        let session = mount_and_create_files_with_symlinks(
+            Vec::new(),
+            symlink_map.clone().into_iter().collect(),
+            None,
+        )?;
+
+        let entries = fs::read_dir(&session.mountpoint)?
+            .map(|entry| entry.unwrap())
+            .collect::<Vec<_>>();
+
+        assert_eq!(entries.len(), symlink_map.len() + 1);
+
+        assert_eq!(
+            entries
+                .iter()
+                .filter(|item| item.file_name() == CONFIG_FILE_NAME)
+                .count(),
+            1
+        );
+
+        let symlinks_found = entries
+            .iter()
+            .filter(|item| item.file_type().unwrap().is_symlink())
+            .collect::<Vec<_>>();
+
+        assert_eq!(symlinks_found.len(), symlink_map.len());
+
+        assert!(symlinks_found.first().unwrap().path().is_dir());
+
+        for symlink in symlinks_found {
+            let symlink = symlink.path();
+            let link_name = symlink.file_name().unwrap().to_str().unwrap();
+            let target = symlink_map.remove(link_name);
+            assert_ne!(target, None);
+            let target = target.unwrap();
+            assert_eq!(fs::read_link(symlink)?.to_str().unwrap(), target);
+        }
+
+        assert!(symlink_map.is_empty());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_symlink_broken() -> Result<(), std::io::Error> {
+        // A symlink should just be presented as such, no splitting or any other modification. If
+        // the target does not exist, just show a broken symlink, do not panic out.
+
+        let mut symlink_map = HashMap::new();
+        symlink_map.insert("link_rel".into(), "a/b/c".into());
+        symlink_map.insert("link_abs".into(), "/home/nobody/nothing".into());
+
+        let session = mount_and_create_files_with_symlinks(
+            Vec::new(),
+            symlink_map.clone().into_iter().collect(),
+            None,
+        )?;
+
+        let entries = fs::read_dir(&session.mountpoint)?
+            .map(|entry| entry.unwrap())
+            .collect::<Vec<_>>();
+
+        assert_eq!(entries.len(), symlink_map.len() + 1);
+
+        assert_eq!(
+            entries
+                .iter()
+                .filter(|item| item.file_name() == CONFIG_FILE_NAME)
+                .count(),
+            1
+        );
+
+        let symlinks_found = entries
+            .iter()
+            .filter(|item| item.file_type().unwrap().is_symlink())
+            .collect::<Vec<_>>();
+
+        assert_eq!(symlinks_found.len(), symlink_map.len());
+
+        for symlink in symlinks_found {
+            let symlink = symlink.path();
+            let link_name = symlink.file_name().unwrap().to_str().unwrap();
+            let target = symlink_map.remove(link_name);
+            assert_ne!(target, None);
+            let target = target.unwrap();
+            assert_eq!(fs::read_link(symlink)?.to_str().unwrap(), target);
+        }
+
+        assert!(symlink_map.is_empty());
 
         Ok(())
     }
