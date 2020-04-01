@@ -236,6 +236,13 @@ impl Filesystem for SplitFS {
         }
     }
 
+    fn readlink(&mut self, _req: &Request, ino: u64, reply: ReplyData) {
+        let path = self.get_file_info_from_ino(ino).unwrap().path;
+        let target = fs::read_link(path).unwrap();
+        let target = target.to_str().unwrap().as_bytes();
+        reply.data(target);
+    }
+
     fn open(&mut self, _req: &Request, ino: u64, _flags: u32, reply: ReplyOpen) {
         if ino == INO_CONFIG {
             reply.opened(0, 0);
