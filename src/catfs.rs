@@ -442,7 +442,7 @@ mod tests {
     fn mount_and_create_files_with_symlinks<'a>(
         files: &Vec<(String, Vec<u8>)>,
         symlinks: Vec<(String, String)>,
-    ) -> Result<(TempSession<'a>), std::io::Error> {
+    ) -> Result<TempSession<'a>, std::io::Error> {
         let mirror = tempdir()?;
         let mountpoint = tempdir()?;
 
@@ -470,7 +470,7 @@ mod tests {
 
     fn mount_and_create_files<'a>(
         files: &Vec<(String, Vec<u8>)>,
-    ) -> Result<(TempSession<'a>), std::io::Error> {
+    ) -> Result<TempSession<'a>, std::io::Error> {
         mount_and_create_files_with_symlinks(files, Vec::new())
     }
 

@@ -466,7 +466,7 @@ mod tests {
         files: Vec<(String, Vec<u8>)>,
         symlinks: Vec<(String, String)>,
         config: Option<Config>,
-    ) -> Result<(TempSession<'a>), std::io::Error> {
+    ) -> Result<TempSession<'a>, std::io::Error> {
         let mirror = tempdir()?;
         let mountpoint = tempdir()?;
 
@@ -495,14 +495,14 @@ mod tests {
     fn mount_and_create_files<'a>(
         files: Vec<(String, Vec<u8>)>,
         config: Option<Config>,
-    ) -> Result<(TempSession<'a>), std::io::Error> {
+    ) -> Result<TempSession<'a>, std::io::Error> {
         mount_and_create_files_with_symlinks(files, Vec::new(), config)
     }
 
     fn mount_and_create_seq_files<'a>(
         num_files: usize,
         config: Option<Config>,
-    ) -> Result<(TempSession<'a>), std::io::Error> {
+    ) -> Result<TempSession<'a>, std::io::Error> {
         let files = (0..num_files)
             .map(|i| {
                 let i_as_string = format!("{}", i);
