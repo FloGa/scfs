@@ -120,9 +120,9 @@
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::fs::Metadata;
-use std::os::linux::fs::MetadataExt;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::ffi::OsStringExt;
+use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 
 use fuse::{BackgroundSession, FileAttr, FileType, Filesystem};
@@ -200,23 +200,19 @@ fn convert_filetype(ft: fs::FileType) -> Option<FileType> {
 
 fn convert_metadata_to_attr(meta: Metadata, ino: Option<u64>) -> FileAttr {
     FileAttr {
-        ino: if let Some(ino) = ino {
-            ino
-        } else {
-            meta.st_ino()
-        },
-        size: meta.st_size(),
-        blocks: meta.st_blocks(),
-        atime: Timespec::new(meta.st_atime(), meta.st_atime_nsec() as i32),
-        mtime: Timespec::new(meta.st_mtime(), meta.st_mtime_nsec() as i32),
-        ctime: Timespec::new(meta.st_ctime(), meta.st_ctime_nsec() as i32),
+        ino: if let Some(ino) = ino { ino } else { meta.ino() },
+        size: meta.size(),
+        blocks: meta.blocks(),
+        atime: Timespec::new(meta.atime(), meta.atime_nsec() as i32),
+        mtime: Timespec::new(meta.mtime(), meta.mtime_nsec() as i32),
+        ctime: Timespec::new(meta.ctime(), meta.ctime_nsec() as i32),
         crtime: Timespec::new(0, 0),
         kind: convert_filetype(meta.file_type()).expect("Filetype not supported"),
-        perm: meta.st_mode() as u16,
-        nlink: meta.st_nlink() as u32,
-        uid: meta.st_uid(),
-        gid: meta.st_gid(),
-        rdev: meta.st_rdev() as u32,
+        perm: meta.mode() as u16,
+        nlink: meta.nlink() as u32,
+        uid: meta.uid(),
+        gid: meta.gid(),
+        rdev: meta.rdev() as u32,
         flags: 0,
     }
 }
