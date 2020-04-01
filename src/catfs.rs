@@ -132,7 +132,7 @@ impl CatFS {
             attr
         } else {
             let attr = convert_metadata_to_attr(
-                fs::metadata(&file_info.path).unwrap(),
+                fs::symlink_metadata(&file_info.path).unwrap(),
                 Some(file_info.ino),
             );
             attr
@@ -141,6 +141,8 @@ impl CatFS {
 
     fn populate<P: AsRef<Path>>(file_db: &Connection, path: P, parent_ino: u64) {
         let path = path.as_ref();
+
+        let attr = convert_metadata_to_attr(path.symlink_metadata().unwrap(), None);
 
         if path.file_name().unwrap() == CONFIG_FILE_NAME {
             return;
@@ -157,7 +159,7 @@ impl CatFS {
             parent_ino,
             path: OsString::from(path),
             file_name: path.file_name().unwrap().into(),
-            part: if path.is_file() {
+            part: if let FileType::RegularFile = attr.kind {
                 path.file_name().unwrap().to_str().unwrap()[5..]
                     .parse::<u64>()
                     .unwrap()
@@ -166,6 +168,7 @@ impl CatFS {
                 0
             },
             vdir: false,
+            symlink: attr.kind == FileType::Symlink,
         });
 
         file_db
@@ -177,11 +180,12 @@ impl CatFS {
                 file_info.path,
                 file_info.file_name,
                 file_info.part,
-                file_info.vdir
+                file_info.vdir,
+                file_info.symlink,
             ])
             .unwrap();
 
-        if path.is_dir() {
+        if let FileType::Directory = attr.kind {
             for entry in fs::read_dir(path).unwrap() {
                 let entry = entry.unwrap();
                 CatFS::populate(&file_db, entry.path(), ino);
@@ -387,7 +391,9 @@ impl Filesystem for CatFS {
                         }
                         + off as i64
                         + 1,
-                    if item.vdir {
+                    if item.symlink {
+                        FileType::Symlink
+                    } else if item.vdir {
                         FileType::RegularFile
                     } else {
                         FileType::Directory

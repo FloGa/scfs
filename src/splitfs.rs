@@ -93,7 +93,13 @@ impl SplitFS {
     }
 
     fn get_attr_from_file_info(&self, file_info: &FileInfo) -> FileAttr {
-        if file_info.part == 0 {
+        if file_info.symlink {
+            let attr = convert_metadata_to_attr(
+                fs::symlink_metadata(&file_info.path).unwrap(),
+                Some(file_info.ino),
+            );
+            attr
+        } else if file_info.part == 0 {
             let mut attr = convert_metadata_to_attr(
                 fs::metadata(&file_info.path).unwrap(),
                 Some(file_info.ino),
@@ -133,7 +139,7 @@ impl SplitFS {
     fn populate<P: AsRef<Path>>(file_db: &Connection, path: P, config: &Config, parent_ino: u64) {
         let path = path.as_ref();
 
-        let mut attr = convert_metadata_to_attr(path.metadata().unwrap(), None);
+        let mut attr = convert_metadata_to_attr(path.symlink_metadata().unwrap(), None);
 
         attr.ino = if parent_ino == INO_OUTSIDE {
             INO_ROOT
@@ -148,6 +154,7 @@ impl SplitFS {
             file_name: path.file_name().unwrap().into(),
             part: 0,
             vdir: attr.kind == FileType::RegularFile,
+            symlink: attr.kind == FileType::Symlink,
         });
 
         file_db
@@ -159,11 +166,13 @@ impl SplitFS {
                 file_info.path,
                 file_info.file_name,
                 file_info.part,
-                file_info.vdir
+                file_info.vdir,
+                file_info.symlink,
             ])
             .unwrap();
 
-        if let FileType::RegularFile = attr.kind {
+        match attr.kind {
+            FileType::RegularFile => {
             // Create at least one chunk, even if it is empty. This way, we can differentiate
             // between an empty file and an empty directory.
             let blocks = 1.max(f64::ceil(attr.size as f64 / config.blocksize as f64) as u64);
@@ -176,6 +185,7 @@ impl SplitFS {
                     file_name,
                     part: i + 1,
                     vdir: false,
+                    symlink: false,
                 });
 
                 file_db
@@ -187,17 +197,21 @@ impl SplitFS {
                         file_info.path,
                         file_info.file_name,
                         file_info.part,
-                        file_info.vdir
+                        file_info.vdir,
+                        file_info.symlink,
                     ])
                     .unwrap();
             }
-        }
+            }
 
-        if path.is_dir() {
+            FileType::Directory => {
             for entry in fs::read_dir(path).unwrap() {
                 let entry = entry.unwrap();
                 SplitFS::populate(&file_db, entry.path(), &config, attr.ino);
             }
+            }
+
+            _ => {}
         }
     }
 }
@@ -404,7 +418,9 @@ impl Filesystem for SplitFS {
                 let is_full = reply.add(
                     item.ino,
                     offset + additional_offset + off as i64 + 1,
-                    if item.part > 0 {
+                    if item.symlink {
+                        FileType::Symlink
+                    } else if item.part > 0 {
                         FileType::RegularFile
                     } else {
                         FileType::Directory
