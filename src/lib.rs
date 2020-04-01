@@ -186,15 +186,15 @@ const INO_OUTSIDE: u64 = 0;
 const INO_ROOT: u64 = 1;
 const INO_CONFIG: u64 = 2;
 
-fn convert_filetype(ft: fs::FileType) -> FileType {
+fn convert_filetype(ft: fs::FileType) -> Option<FileType> {
     if ft.is_dir() {
-        FileType::Directory
+        Some(FileType::Directory)
     } else if ft.is_file() {
-        FileType::RegularFile
+        Some(FileType::RegularFile)
     } else if ft.is_symlink() {
-        FileType::Symlink
+        Some(FileType::Symlink)
     } else {
-        panic!("Not supported")
+        None
     }
 }
 
@@ -211,7 +211,7 @@ fn convert_metadata_to_attr(meta: Metadata, ino: Option<u64>) -> FileAttr {
         mtime: Timespec::new(meta.st_mtime(), meta.st_mtime_nsec() as i32),
         ctime: Timespec::new(meta.st_ctime(), meta.st_ctime_nsec() as i32),
         crtime: Timespec::new(0, 0),
-        kind: convert_filetype(meta.file_type()),
+        kind: convert_filetype(meta.file_type()).expect("Filetype not supported"),
         perm: meta.st_mode() as u16,
         nlink: meta.st_nlink() as u32,
         uid: meta.st_uid(),
