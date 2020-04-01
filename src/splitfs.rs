@@ -173,42 +173,42 @@ impl SplitFS {
 
         match attr.kind {
             FileType::RegularFile => {
-            // Create at least one chunk, even if it is empty. This way, we can differentiate
-            // between an empty file and an empty directory.
-            let blocks = 1.max(f64::ceil(attr.size as f64 / config.blocksize as f64) as u64);
-            for i in 0..blocks {
-                let file_name = format!("scfs.{:010}", i).into();
-                let file_info = FileInfoRow::from(FileInfo {
-                    ino: attr.ino + i + 1,
-                    parent_ino: attr.ino,
-                    path: OsString::from(path.join(&file_name)),
-                    file_name,
-                    part: i + 1,
-                    vdir: false,
-                    symlink: false,
-                });
+                // Create at least one chunk, even if it is empty. This way, we can differentiate
+                // between an empty file and an empty directory.
+                let blocks = 1.max(f64::ceil(attr.size as f64 / config.blocksize as f64) as u64);
+                for i in 0..blocks {
+                    let file_name = format!("scfs.{:010}", i).into();
+                    let file_info = FileInfoRow::from(FileInfo {
+                        ino: attr.ino + i + 1,
+                        parent_ino: attr.ino,
+                        path: OsString::from(path.join(&file_name)),
+                        file_name,
+                        part: i + 1,
+                        vdir: false,
+                        symlink: false,
+                    });
 
-                file_db
-                    .prepare_cached(STMT_INSERT)
-                    .unwrap()
-                    .execute(params![
-                        file_info.ino,
-                        file_info.parent_ino,
-                        file_info.path,
-                        file_info.file_name,
-                        file_info.part,
-                        file_info.vdir,
-                        file_info.symlink,
-                    ])
-                    .unwrap();
-            }
+                    file_db
+                        .prepare_cached(STMT_INSERT)
+                        .unwrap()
+                        .execute(params![
+                            file_info.ino,
+                            file_info.parent_ino,
+                            file_info.path,
+                            file_info.file_name,
+                            file_info.part,
+                            file_info.vdir,
+                            file_info.symlink,
+                        ])
+                        .unwrap();
+                }
             }
 
             FileType::Directory => {
-            for entry in fs::read_dir(path).unwrap() {
-                let entry = entry.unwrap();
-                SplitFS::populate(&file_db, entry.path(), &config, attr.ino);
-            }
+                for entry in fs::read_dir(path).unwrap() {
+                    let entry = entry.unwrap();
+                    SplitFS::populate(&file_db, entry.path(), &config, attr.ino);
+                }
             }
 
             _ => {}
