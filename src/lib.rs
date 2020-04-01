@@ -141,22 +141,41 @@ const TTL: Timespec = Timespec {
     nsec: 0,
 };
 
-const STMT_CREATE: &str = "CREATE TABLE Files (
-    ino INTEGER PRIMARY KEY,
-    parent_ino INTEGER,
-    path TEXT UNIQUE,
-    file_name TEXT,
-    part INTEGER,
-    vdir INTEGER
-    )";
-const STMT_CREATE_INDEX_PARENT_INO_FILE_NAME: &str =
-    "CREATE INDEX idx_parent_ino_file_name ON Files (parent_ino, file_name)";
-const STMT_INSERT: &str =
-    "INSERT INTO Files (ino, parent_ino, path, file_name, part, vdir) VALUES (?, ?, ?, ?, ?, ?)";
-const STMT_QUERY_BY_INO: &str = "SELECT * FROM Files WHERE ino = ?";
-const STMT_QUERY_BY_PARENT_INO: &str = "SELECT * FROM Files WHERE parent_ino = ? LIMIT -1 OFFSET ?";
-const STMT_QUERY_BY_PARENT_INO_AND_FILENAME: &str =
-    "SELECT * FROM Files WHERE parent_ino = ? AND file_name = ?";
+const STMT_CREATE: &str = "
+    CREATE TABLE Files (
+        ino INTEGER PRIMARY KEY,
+        parent_ino INTEGER,
+        path TEXT UNIQUE,
+        file_name TEXT,
+        part INTEGER,
+        vdir INTEGER
+    )
+";
+const STMT_CREATE_INDEX_PARENT_INO_FILE_NAME: &str = "
+    CREATE INDEX idx_parent_ino_file_name
+    ON Files (parent_ino, file_name)
+";
+const STMT_INSERT: &str = "
+    INSERT INTO Files (ino, parent_ino, path, file_name, part, vdir)
+    VALUES (?, ?, ?, ?, ?, ?)
+";
+const STMT_QUERY_BY_INO: &str = "
+    SELECT *
+    FROM Files
+    WHERE ino = ?
+";
+const STMT_QUERY_BY_PARENT_INO: &str = "
+    SELECT *
+    FROM Files
+    WHERE parent_ino = ?
+    LIMIT -1 OFFSET ?
+";
+const STMT_QUERY_BY_PARENT_INO_AND_FILENAME: &str = "
+    SELECT *
+    FROM Files
+    WHERE parent_ino = ?
+    AND file_name = ?
+";
 
 const CONFIG_FILE_NAME: &str = ".scfs_config";
 
