@@ -9,6 +9,8 @@
     Symlinks should be presented as-is, so it should never be necessary to
     traverse them.
 
+-   Silently ignore unsupported filetypes
+
 # Changes in 0.7.0
 
 -   Make blocksize customizable
