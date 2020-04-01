@@ -141,22 +141,42 @@ const TTL: Timespec = Timespec {
     nsec: 0,
 };
 
-const STMT_CREATE: &str = "CREATE TABLE Files (
-    ino INTEGER PRIMARY KEY,
-    parent_ino INTEGER,
-    path TEXT UNIQUE,
-    file_name TEXT,
-    part INTEGER,
-    vdir INTEGER
-    )";
-const STMT_CREATE_INDEX_PARENT_INO_FILE_NAME: &str =
-    "CREATE INDEX idx_parent_ino_file_name ON Files (parent_ino, file_name)";
-const STMT_INSERT: &str =
-    "INSERT INTO Files (ino, parent_ino, path, file_name, part, vdir) VALUES (?, ?, ?, ?, ?, ?)";
-const STMT_QUERY_BY_INO: &str = "SELECT * FROM Files WHERE ino = ?";
-const STMT_QUERY_BY_PARENT_INO: &str = "SELECT * FROM Files WHERE parent_ino = ? LIMIT -1 OFFSET ?";
-const STMT_QUERY_BY_PARENT_INO_AND_FILENAME: &str =
-    "SELECT * FROM Files WHERE parent_ino = ? AND file_name = ?";
+const STMT_CREATE: &str = "
+    CREATE TABLE Files (
+        ino INTEGER PRIMARY KEY,
+        parent_ino INTEGER,
+        path TEXT UNIQUE,
+        file_name TEXT,
+        part INTEGER,
+        vdir INTEGER,
+        symlink INTEGER
+    )
+";
+const STMT_CREATE_INDEX_PARENT_INO_FILE_NAME: &str = "
+    CREATE INDEX idx_parent_ino_file_name
+    ON Files (parent_ino, file_name)
+";
+const STMT_INSERT: &str = "
+    INSERT INTO Files (ino, parent_ino, path, file_name, part, vdir, symlink)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+";
+const STMT_QUERY_BY_INO: &str = "
+    SELECT *
+    FROM Files
+    WHERE ino = ?
+";
+const STMT_QUERY_BY_PARENT_INO: &str = "
+    SELECT *
+    FROM Files
+    WHERE parent_ino = ?
+    LIMIT -1 OFFSET ?
+";
+const STMT_QUERY_BY_PARENT_INO_AND_FILENAME: &str = "
+    SELECT *
+    FROM Files
+    WHERE parent_ino = ?
+    AND file_name = ?
+";
 
 const CONFIG_FILE_NAME: &str = ".scfs_config";
 
@@ -227,6 +247,7 @@ struct FileInfo {
     file_name: OsString,
     part: u64,
     vdir: bool,
+    symlink: bool,
 }
 
 impl FileInfo {
@@ -238,6 +259,7 @@ impl FileInfo {
             file_name: Default::default(),
             part: 0,
             vdir: false,
+            symlink: false,
         }
     }
 
@@ -249,6 +271,7 @@ impl FileInfo {
             file_name: Default::default(),
             part: 0,
             vdir: false,
+            symlink: false,
         }
     }
 
@@ -276,6 +299,7 @@ struct FileInfoRow {
     file_name: Vec<u8>,
     part: i64,
     vdir: bool,
+    symlink: bool,
 }
 
 impl From<&Row<'_>> for FileInfoRow {
@@ -287,6 +311,7 @@ impl From<&Row<'_>> for FileInfoRow {
             file_name: row.get_unwrap(3),
             part: row.get_unwrap(4),
             vdir: row.get_unwrap(5),
+            symlink: row.get_unwrap(6),
         }
     }
 }
@@ -300,6 +325,7 @@ impl From<FileInfoRow> for FileInfo {
             file_name: OsString::from_vec(f.file_name),
             part: f.part as u64,
             vdir: f.vdir,
+            symlink: f.symlink,
         }
     }
 }
@@ -313,6 +339,7 @@ impl From<FileInfo> for FileInfoRow {
             file_name: f.file_name.as_bytes().to_vec(),
             part: f.part as i64,
             vdir: f.vdir,
+            symlink: f.symlink,
         }
     }
 }
@@ -350,6 +377,7 @@ mod tests {
             file_name: OsString::from("/path/to/files/File.Name"),
             part: 5,
             vdir: true,
+            symlink: false,
         };
 
         let file_info_row = FileInfoRow::from(file_info.clone());
