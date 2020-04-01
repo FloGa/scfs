@@ -122,7 +122,10 @@ impl CatFS {
             let attrs = parts
                 .iter()
                 .map(|info| {
-                    convert_metadata_to_attr(fs::metadata(&info.path).unwrap(), Some(info.ino))
+                    convert_metadata_to_attr(
+                        fs::symlink_metadata(&info.path).unwrap(),
+                        Some(info.ino),
+                    )
                 })
                 .collect::<Vec<_>>();
             let mut attr = attrs.get(0).unwrap().clone();

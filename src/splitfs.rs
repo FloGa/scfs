@@ -101,7 +101,7 @@ impl SplitFS {
             attr
         } else if file_info.part == 0 {
             let mut attr = convert_metadata_to_attr(
-                fs::metadata(&file_info.path).unwrap(),
+                fs::symlink_metadata(&file_info.path).unwrap(),
                 Some(file_info.ino),
             );
             attr.kind = FileType::Directory;
@@ -110,7 +110,7 @@ impl SplitFS {
             attr
         } else {
             let mut attr = convert_metadata_to_attr(
-                fs::metadata(
+                fs::symlink_metadata(
                     self.get_file_info_from_ino(file_info.parent_ino)
                         .unwrap()
                         .path,
