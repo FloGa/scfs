@@ -230,7 +230,7 @@ where
     let options = ["-o", "ro", "-o", "fsname=scfs"]
         .iter()
         .map(|o| o.as_ref())
-        .collect::<Vec<&OsStr>>();
+        .collect::<Vec<_>>();
 
     unsafe { fuse::spawn_mount(filesystem, &mountpoint, &options).unwrap() }
 }
