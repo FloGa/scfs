@@ -219,10 +219,14 @@ fn convert_metadata_to_attr(meta: Metadata, ino: Option<u64>) -> FileAttr {
     }
 }
 
-pub fn mount<'a, FS: Filesystem + Send + 'a, P: AsRef<Path>>(
+pub fn mount<'a, FS, P>(
     filesystem: FS,
     mountpoint: &P,
-) -> BackgroundSession<'a> {
+) -> BackgroundSession<'a>
+where
+    FS: Filesystem + Send + 'a,
+    P: AsRef<Path>,
+{
     let options = ["-o", "ro", "-o", "fsname=scfs"]
         .iter()
         .map(|o| o.as_ref())
