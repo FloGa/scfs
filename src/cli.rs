@@ -1,10 +1,12 @@
-use crate::{mount, CatFS, Config, SplitFS};
+use std::ffi::OsStr;
+use std::sync::mpsc::channel;
+
 use clap::{
     arg_enum, crate_authors, crate_description, crate_name, crate_version, value_t, App, Arg,
     ArgMatches, Result,
 };
-use std::ffi::OsStr;
-use std::sync::mpsc::channel;
+
+use crate::{mount, CatFS, Config, SplitFS};
 
 const ARG_MODE: &str = "mode";
 const ARG_MIRROR: &str = "mirror";
