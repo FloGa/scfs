@@ -11,6 +11,11 @@
 
 -   Silently ignore unsupported filetypes
 
+-   Add convenience wrappers for catfs and splitfs
+
+    With these wrappers, it is possible to mount the respective filesystem
+    without explicitly specifying the mode parameter.
+
 # Changes in 0.7.0
 
 -   Make blocksize customizable
