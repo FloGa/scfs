@@ -136,6 +136,8 @@ pub use splitfs::SplitFS;
 mod catfs;
 mod splitfs;
 
+pub mod cli;
+
 const TTL: Timespec = Timespec {
     sec: 60 * 60 * 24,
     nsec: 0,
