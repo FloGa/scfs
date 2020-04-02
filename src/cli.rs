@@ -3,12 +3,15 @@ use clap::{
     crate_authors, crate_description, crate_name, crate_version, value_t, App, Arg, ArgMatches,
     Result,
 };
+use std::ffi::OsStr;
 use std::sync::mpsc::channel;
 
 const ARG_MODE: &str = "mode";
 const ARG_MIRROR: &str = "mirror";
 const ARG_MOUNTPOINT: &str = "mountpoint";
 const ARG_BLOCKSIZE: &str = "blocksize";
+const ARG_FUSE_OPTIONS: &str = "fuse_options";
+const ARG_FUSE_OPTIONS_EXTRA: &str = "fuse_options_extra";
 
 pub enum Cli {
     SCFS,
@@ -34,6 +37,17 @@ impl Cli {
         let mountpoint = arguments.value_of_os(ARG_MOUNTPOINT);
         let blocksize = value_t!(arguments, ARG_BLOCKSIZE, u64);
 
+        let fuse_options = arguments
+            .values_of_os(ARG_FUSE_OPTIONS)
+            .unwrap_or_default()
+            .chain(
+                arguments
+                    .values_of_os(ARG_FUSE_OPTIONS_EXTRA)
+                    .unwrap_or_default(),
+            )
+            .flat_map(|option| vec![OsStr::new("-o"), option]);
+        // .flat_map(|option| iter::once(OsStr::new("-o")).chain(iter::once(option)));
+
         let (tx_quitter, rx_quitter) = channel();
 
         ctrlc::set_handler(move || {
@@ -44,14 +58,14 @@ impl Cli {
         let _session = match (self, mode) {
             (Cli::CatFS, _) | (Cli::SCFS, Some("cat")) => {
                 let fs = CatFS::new(mirror.unwrap());
-                mount(fs, &mountpoint.unwrap())
+                mount(fs, &mountpoint.unwrap(), fuse_options)
             }
 
             (Cli::SplitFS, _) | (Cli::SCFS, Some("split")) => {
                 let blocksize = blocksize.unwrap_or_else(|e| e.exit());
                 let config = Config::default().blocksize(blocksize);
                 let fs = SplitFS::new(mirror.unwrap(), config);
-                mount(fs, &mountpoint.unwrap())
+                mount(fs, &mountpoint.unwrap(), fuse_options)
             }
 
             _ => unreachable!(),
@@ -81,12 +95,22 @@ fn app_splitfs<'a, 'b>() -> App<'a, 'b> {
 
 fn args_base<'a, 'b>() -> Vec<Arg<'a, 'b>> {
     vec![
+        Arg::with_name(ARG_FUSE_OPTIONS)
+            .short("o")
+            .help("Additional options, which are passed down to FUSE")
+            .multiple(true)
+            .takes_value(true)
+            .number_of_values(1),
         Arg::with_name(ARG_MIRROR)
             .help("Defines the directory that will be mirrored")
             .required(true),
         Arg::with_name(ARG_MOUNTPOINT)
             .help("Defines the mountpoint, where the mirror will be accessible")
             .required(true),
+        Arg::with_name(ARG_FUSE_OPTIONS_EXTRA)
+            .help("Additional options, which are passed down to FUSE")
+            .multiple(true)
+            .last(true),
     ]
 }
 

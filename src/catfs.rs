@@ -466,7 +466,7 @@ mod tests {
 
         let fs = CatFS::new(mirror.path().as_os_str());
 
-        let session = mount(fs, &mountpoint);
+        let session = mount(fs, &mountpoint, Vec::new());
 
         Ok(TempSession {
             _mirror: mirror,

@@ -489,7 +489,7 @@ mod tests {
 
         let fs = SplitFS::new(mirror.path().as_os_str(), config.unwrap_or_default());
 
-        let session = mount(fs, &mountpoint);
+        let session = mount(fs, &mountpoint, Vec::new());
 
         Ok(TempSession {
             _mirror: mirror,

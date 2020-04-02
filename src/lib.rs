@@ -219,14 +219,21 @@ fn convert_metadata_to_attr(meta: Metadata, ino: Option<u64>) -> FileAttr {
     }
 }
 
-pub fn mount<'a, FS: Filesystem + Send + 'a, P: AsRef<Path>>(
+pub fn mount<'a, 'b, FS, P, I>(
     filesystem: FS,
     mountpoint: &P,
-) -> BackgroundSession<'a> {
+    fuse_options: I,
+) -> BackgroundSession<'a>
+where
+    FS: Filesystem + Send + 'a,
+    P: AsRef<Path>,
+    I: IntoIterator<Item = &'b OsStr>,
+{
     let options = ["-o", "ro", "-o", "fsname=scfs"]
         .iter()
         .map(|o| o.as_ref())
-        .collect::<Vec<&OsStr>>();
+        .chain(fuse_options)
+        .collect::<Vec<_>>();
 
     unsafe { fuse::spawn_mount(filesystem, &mountpoint, &options).unwrap() }
 }
