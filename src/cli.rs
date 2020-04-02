@@ -1,7 +1,7 @@
 use crate::{mount, CatFS, Config, SplitFS};
 use clap::{
-    crate_authors, crate_description, crate_name, crate_version, value_t, App, Arg, ArgMatches,
-    Result,
+    arg_enum, crate_authors, crate_description, crate_name, crate_version, value_t, App, Arg,
+    ArgMatches, Result,
 };
 use std::ffi::OsStr;
 use std::sync::mpsc::channel;
@@ -13,10 +13,12 @@ const ARG_BLOCKSIZE: &str = "blocksize";
 const ARG_FUSE_OPTIONS: &str = "fuse_options";
 const ARG_FUSE_OPTIONS_EXTRA: &str = "fuse_options_extra";
 
-pub enum Cli {
-    SCFS,
-    SplitFS,
-    CatFS,
+arg_enum! {
+    pub enum Cli {
+        SCFS,
+        SplitFS,
+        CatFS,
+    }
 }
 
 impl Cli {
@@ -159,23 +161,17 @@ fn args_splitfs<'a, 'b>() -> Vec<Arg<'a, 'b>> {
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
     use super::*;
 
     #[test]
-    fn get_arguments_scfs() {
-        // This call must not panic.
-        let _args = Cli::SCFS.get_arguments();
-    }
-
-    #[test]
-    fn get_arguments_catfs() {
-        // This call must not panic.
-        let _args = Cli::CatFS.get_arguments();
-    }
-
-    #[test]
-    fn get_arguments_splitfs() {
-        // This call must not panic.
-        let _args = Cli::SplitFS.get_arguments();
+    fn get_arguments() {
+        for variant in &Cli::variants() {
+            println!("Testing {:?}", variant);
+            let variant = Cli::from_str(variant).unwrap();
+            // This call must not panic.
+            let _args = variant.get_arguments();
+        }
     }
 }
