@@ -1,3 +1,5 @@
+# Changes since latest release
+
 # Changes in 0.8.0
 
 -   Implement readlink
