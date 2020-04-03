@@ -1,3 +1,21 @@
+# Changes in 0.8.0
+
+-   Implement readlink
+
+-   Correctly handle symlinks
+
+-   Replace each metadata with symlink_metadata
+
+    Symlinks should be presented as-is, so it should never be necessary to
+    traverse them.
+
+-   Silently ignore unsupported filetypes
+
+-   Add convenience wrappers for catfs and splitfs
+
+    With these wrappers, it is possible to mount the respective filesystem
+    without explicitly specifying the mode parameter.
+
 # Changes in 0.7.0
 
 -   Make blocksize customizable

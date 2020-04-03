@@ -13,10 +13,10 @@ use libc::ENOENT;
 use rusqlite::{params, Connection, Error, NO_PARAMS};
 
 use crate::{
-    convert_metadata_to_attr, Config, FileHandle, FileInfo, FileInfoRow, CONFIG_FILE_NAME,
-    INO_CONFIG, INO_OUTSIDE, INO_ROOT, STMT_CREATE, STMT_CREATE_INDEX_PARENT_INO_FILE_NAME,
-    STMT_INSERT, STMT_QUERY_BY_INO, STMT_QUERY_BY_PARENT_INO,
-    STMT_QUERY_BY_PARENT_INO_AND_FILENAME, TTL,
+    convert_filetype, convert_metadata_to_attr, Config, FileHandle, FileInfo, FileInfoRow,
+    CONFIG_FILE_NAME, INO_CONFIG, INO_OUTSIDE, INO_ROOT, STMT_CREATE,
+    STMT_CREATE_INDEX_PARENT_INO_FILE_NAME, STMT_INSERT, STMT_QUERY_BY_INO,
+    STMT_QUERY_BY_PARENT_INO, STMT_QUERY_BY_PARENT_INO_AND_FILENAME, TTL,
 };
 
 pub struct SplitFS {
@@ -93,9 +93,15 @@ impl SplitFS {
     }
 
     fn get_attr_from_file_info(&self, file_info: &FileInfo) -> FileAttr {
-        if file_info.part == 0 {
+        if file_info.symlink {
+            let attr = convert_metadata_to_attr(
+                fs::symlink_metadata(&file_info.path).unwrap(),
+                Some(file_info.ino),
+            );
+            attr
+        } else if file_info.part == 0 {
             let mut attr = convert_metadata_to_attr(
-                fs::metadata(&file_info.path).unwrap(),
+                fs::symlink_metadata(&file_info.path).unwrap(),
                 Some(file_info.ino),
             );
             attr.kind = FileType::Directory;
@@ -104,7 +110,7 @@ impl SplitFS {
             attr
         } else {
             let mut attr = convert_metadata_to_attr(
-                fs::metadata(
+                fs::symlink_metadata(
                     self.get_file_info_from_ino(file_info.parent_ino)
                         .unwrap()
                         .path,
@@ -133,7 +139,13 @@ impl SplitFS {
     fn populate<P: AsRef<Path>>(file_db: &Connection, path: P, config: &Config, parent_ino: u64) {
         let path = path.as_ref();
 
-        let mut attr = convert_metadata_to_attr(path.metadata().unwrap(), None);
+        let meta = path.symlink_metadata().unwrap();
+
+        if let None = convert_filetype(meta.file_type()) {
+            return;
+        }
+
+        let mut attr = convert_metadata_to_attr(meta, None);
 
         attr.ino = if parent_ino == INO_OUTSIDE {
             INO_ROOT
@@ -148,6 +160,7 @@ impl SplitFS {
             file_name: path.file_name().unwrap().into(),
             part: 0,
             vdir: attr.kind == FileType::RegularFile,
+            symlink: attr.kind == FileType::Symlink,
         });
 
         file_db
@@ -159,45 +172,52 @@ impl SplitFS {
                 file_info.path,
                 file_info.file_name,
                 file_info.part,
-                file_info.vdir
+                file_info.vdir,
+                file_info.symlink,
             ])
             .unwrap();
 
-        if let FileType::RegularFile = attr.kind {
-            // Create at least one chunk, even if it is empty. This way, we can differentiate
-            // between an empty file and an empty directory.
-            let blocks = 1.max(f64::ceil(attr.size as f64 / config.blocksize as f64) as u64);
-            for i in 0..blocks {
-                let file_name = format!("scfs.{:010}", i).into();
-                let file_info = FileInfoRow::from(FileInfo {
-                    ino: attr.ino + i + 1,
-                    parent_ino: attr.ino,
-                    path: OsString::from(path.join(&file_name)),
-                    file_name,
-                    part: i + 1,
-                    vdir: false,
-                });
+        match attr.kind {
+            FileType::RegularFile => {
+                // Create at least one chunk, even if it is empty. This way, we can differentiate
+                // between an empty file and an empty directory.
+                let blocks = 1.max(f64::ceil(attr.size as f64 / config.blocksize as f64) as u64);
+                for i in 0..blocks {
+                    let file_name = format!("scfs.{:010}", i).into();
+                    let file_info = FileInfoRow::from(FileInfo {
+                        ino: attr.ino + i + 1,
+                        parent_ino: attr.ino,
+                        path: OsString::from(path.join(&file_name)),
+                        file_name,
+                        part: i + 1,
+                        vdir: false,
+                        symlink: false,
+                    });
 
-                file_db
-                    .prepare_cached(STMT_INSERT)
-                    .unwrap()
-                    .execute(params![
-                        file_info.ino,
-                        file_info.parent_ino,
-                        file_info.path,
-                        file_info.file_name,
-                        file_info.part,
-                        file_info.vdir
-                    ])
-                    .unwrap();
+                    file_db
+                        .prepare_cached(STMT_INSERT)
+                        .unwrap()
+                        .execute(params![
+                            file_info.ino,
+                            file_info.parent_ino,
+                            file_info.path,
+                            file_info.file_name,
+                            file_info.part,
+                            file_info.vdir,
+                            file_info.symlink,
+                        ])
+                        .unwrap();
+                }
             }
-        }
 
-        if path.is_dir() {
-            for entry in fs::read_dir(path).unwrap() {
-                let entry = entry.unwrap();
-                SplitFS::populate(&file_db, entry.path(), &config, attr.ino);
+            FileType::Directory => {
+                for entry in fs::read_dir(path).unwrap() {
+                    let entry = entry.unwrap();
+                    SplitFS::populate(&file_db, entry.path(), &config, attr.ino);
+                }
             }
+
+            _ => {}
         }
     }
 }
@@ -234,6 +254,13 @@ impl Filesystem for SplitFS {
         } else {
             reply.error(ENOENT)
         }
+    }
+
+    fn readlink(&mut self, _req: &Request, ino: u64, reply: ReplyData) {
+        let path = self.get_file_info_from_ino(ino).unwrap().path;
+        let target = fs::read_link(path).unwrap();
+        let target = target.to_str().unwrap().as_bytes();
+        reply.data(target);
     }
 
     fn open(&mut self, _req: &Request, ino: u64, _flags: u32, reply: ReplyOpen) {
@@ -397,7 +424,9 @@ impl Filesystem for SplitFS {
                 let is_full = reply.add(
                     item.ino,
                     offset + additional_offset + off as i64 + 1,
-                    if item.part > 0 {
+                    if item.symlink {
+                        FileType::Symlink
+                    } else if item.part > 0 {
                         FileType::RegularFile
                     } else {
                         FileType::Directory
@@ -418,7 +447,9 @@ impl Filesystem for SplitFS {
 
 #[cfg(test)]
 mod tests {
+    use std::fs::read;
     use std::io::Write;
+    use std::os::unix::fs::symlink;
 
     use fuse::BackgroundSession;
     use rand::{Rng, RngCore};
@@ -437,10 +468,11 @@ mod tests {
         pub(crate) mountpoint: TempDir,
     }
 
-    fn mount_and_create_files<'a>(
+    fn mount_and_create_files_with_symlinks<'a>(
         files: Vec<(String, Vec<u8>)>,
+        symlinks: Vec<(String, String)>,
         config: Option<Config>,
-    ) -> Result<(TempSession<'a>), std::io::Error> {
+    ) -> Result<TempSession<'a>, std::io::Error> {
         let mirror = tempdir()?;
         let mountpoint = tempdir()?;
 
@@ -451,9 +483,13 @@ mod tests {
             file.write_all(&data)?;
         }
 
+        for (link_name, target) in symlinks {
+            symlink(&target, mirror.path().join(&link_name))?;
+        }
+
         let fs = SplitFS::new(mirror.path().as_os_str(), config.unwrap_or_default());
 
-        let session = mount(fs, &mountpoint);
+        let session = mount(fs, &mountpoint, Vec::new());
 
         Ok(TempSession {
             _mirror: mirror,
@@ -462,10 +498,17 @@ mod tests {
         })
     }
 
+    fn mount_and_create_files<'a>(
+        files: Vec<(String, Vec<u8>)>,
+        config: Option<Config>,
+    ) -> Result<TempSession<'a>, std::io::Error> {
+        mount_and_create_files_with_symlinks(files, Vec::new(), config)
+    }
+
     fn mount_and_create_seq_files<'a>(
         num_files: usize,
         config: Option<Config>,
-    ) -> Result<(TempSession<'a>), std::io::Error> {
+    ) -> Result<TempSession<'a>, std::io::Error> {
         let files = (0..num_files)
             .map(|i| {
                 let i_as_string = format!("{}", i);
@@ -851,6 +894,228 @@ mod tests {
                 .collect::<Vec<_>>(),
             data
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_symlink_relative_file() -> Result<(), std::io::Error> {
+        // A symlink should just be presented as such, no splitting or any other modification.
+
+        let mut symlink_map = HashMap::new();
+        symlink_map.insert("link_rel".into(), CONFIG_FILE_NAME.into());
+
+        let session = mount_and_create_files_with_symlinks(
+            Vec::new(),
+            symlink_map.clone().into_iter().collect(),
+            None,
+        )?;
+
+        let entries = fs::read_dir(&session.mountpoint)?
+            .map(|entry| entry.unwrap())
+            .collect::<Vec<_>>();
+
+        assert_eq!(entries.len(), symlink_map.len() + 1);
+
+        assert_eq!(
+            entries
+                .iter()
+                .filter(|item| item.file_name() == CONFIG_FILE_NAME)
+                .count(),
+            1
+        );
+
+        let symlinks_found = entries
+            .iter()
+            .filter(|item| item.file_type().unwrap().is_symlink())
+            .collect::<Vec<_>>();
+
+        assert_eq!(symlinks_found.len(), symlink_map.len());
+
+        assert_eq!(
+            read(symlinks_found.first().unwrap().path())?,
+            serde_json::to_string(&Config::default())
+                .unwrap()
+                .into_bytes()
+        );
+
+        for symlink in symlinks_found {
+            let symlink = symlink.path();
+            let link_name = symlink.file_name().unwrap().to_str().unwrap();
+            let target = symlink_map.remove(link_name);
+            assert_ne!(target, None);
+            let target = target.unwrap();
+            assert_eq!(fs::read_link(symlink)?.to_str().unwrap(), target);
+        }
+
+        assert!(symlink_map.is_empty());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_symlink_relative_vdir() -> Result<(), std::io::Error> {
+        // A symlink should just be presented as such, no splitting or any other modification. A
+        // relative symlink pointing to a file inside the chunked directory should translate into
+        // the same chunked virtual directory as the real file's counterpart.
+
+        let files = vec![(String::from("a/b/c"), String::from("42").into_bytes())];
+
+        let mut symlink_map = HashMap::new();
+        symlink_map.insert("link_rel".into(), "a/b/c".into());
+
+        let session = mount_and_create_files_with_symlinks(
+            files.clone(),
+            symlink_map.clone().into_iter().collect(),
+            None,
+        )?;
+
+        let entries = fs::read_dir(&session.mountpoint)?
+            .map(|entry| entry.unwrap())
+            .collect::<Vec<_>>();
+
+        assert_eq!(entries.len(), files.len() + symlink_map.len() + 1);
+
+        assert_eq!(
+            entries
+                .iter()
+                .filter(|item| item.file_name() == CONFIG_FILE_NAME)
+                .count(),
+            1
+        );
+
+        let symlinks_found = entries
+            .iter()
+            .filter(|item| item.file_type().unwrap().is_symlink())
+            .collect::<Vec<_>>();
+
+        assert_eq!(symlinks_found.len(), symlink_map.len());
+
+        let parts = symlinks_found
+            .first()
+            .unwrap()
+            .path()
+            .read_dir()
+            .unwrap()
+            .collect::<Vec<_>>();
+
+        assert_eq!(parts.len(), 1);
+
+        assert_eq!(
+            read(parts.first().unwrap().as_ref().unwrap().path())?,
+            files.first().unwrap().1
+        );
+
+        for symlink in symlinks_found {
+            let symlink = symlink.path();
+            let link_name = symlink.file_name().unwrap().to_str().unwrap();
+            let target = symlink_map.remove(link_name);
+            assert_ne!(target, None);
+            let target = target.unwrap();
+            assert_eq!(fs::read_link(symlink)?.to_str().unwrap(), target);
+        }
+
+        assert!(symlink_map.is_empty());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_symlink_absolute_dir() -> Result<(), std::io::Error> {
+        // A symlink should just be presented as such, no splitting or any other modification.
+
+        let mut symlink_map = HashMap::new();
+        symlink_map.insert("link_abs".into(), "/".into());
+
+        let session = mount_and_create_files_with_symlinks(
+            Vec::new(),
+            symlink_map.clone().into_iter().collect(),
+            None,
+        )?;
+
+        let entries = fs::read_dir(&session.mountpoint)?
+            .map(|entry| entry.unwrap())
+            .collect::<Vec<_>>();
+
+        assert_eq!(entries.len(), symlink_map.len() + 1);
+
+        assert_eq!(
+            entries
+                .iter()
+                .filter(|item| item.file_name() == CONFIG_FILE_NAME)
+                .count(),
+            1
+        );
+
+        let symlinks_found = entries
+            .iter()
+            .filter(|item| item.file_type().unwrap().is_symlink())
+            .collect::<Vec<_>>();
+
+        assert_eq!(symlinks_found.len(), symlink_map.len());
+
+        assert!(symlinks_found.first().unwrap().path().is_dir());
+
+        for symlink in symlinks_found {
+            let symlink = symlink.path();
+            let link_name = symlink.file_name().unwrap().to_str().unwrap();
+            let target = symlink_map.remove(link_name);
+            assert_ne!(target, None);
+            let target = target.unwrap();
+            assert_eq!(fs::read_link(symlink)?.to_str().unwrap(), target);
+        }
+
+        assert!(symlink_map.is_empty());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_symlink_broken() -> Result<(), std::io::Error> {
+        // A symlink should just be presented as such, no splitting or any other modification. If
+        // the target does not exist, just show a broken symlink, do not panic out.
+
+        let mut symlink_map = HashMap::new();
+        symlink_map.insert("link_rel".into(), "a/b/c".into());
+        symlink_map.insert("link_abs".into(), "/home/nobody/nothing".into());
+
+        let session = mount_and_create_files_with_symlinks(
+            Vec::new(),
+            symlink_map.clone().into_iter().collect(),
+            None,
+        )?;
+
+        let entries = fs::read_dir(&session.mountpoint)?
+            .map(|entry| entry.unwrap())
+            .collect::<Vec<_>>();
+
+        assert_eq!(entries.len(), symlink_map.len() + 1);
+
+        assert_eq!(
+            entries
+                .iter()
+                .filter(|item| item.file_name() == CONFIG_FILE_NAME)
+                .count(),
+            1
+        );
+
+        let symlinks_found = entries
+            .iter()
+            .filter(|item| item.file_type().unwrap().is_symlink())
+            .collect::<Vec<_>>();
+
+        assert_eq!(symlinks_found.len(), symlink_map.len());
+
+        for symlink in symlinks_found {
+            let symlink = symlink.path();
+            let link_name = symlink.file_name().unwrap().to_str().unwrap();
+            let target = symlink_map.remove(link_name);
+            assert_ne!(target, None);
+            let target = target.unwrap();
+            assert_eq!(fs::read_link(symlink)?.to_str().unwrap(), target);
+        }
+
+        assert!(symlink_map.is_empty());
 
         Ok(())
     }
