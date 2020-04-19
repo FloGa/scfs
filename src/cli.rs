@@ -50,7 +50,6 @@ impl Cli {
                     .unwrap_or_default(),
             )
             .flat_map(|option| vec![OsStr::new("-o"), option]);
-        // .flat_map(|option| iter::once(OsStr::new("-o")).chain(iter::once(option)));
 
         let (tx_quitter, rx_quitter) = channel();
 
