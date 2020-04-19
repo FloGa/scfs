@@ -1,4 +1,5 @@
 use std::ffi::OsStr;
+use std::path::Path;
 use std::sync::mpsc::channel;
 
 use clap::{
@@ -37,9 +38,33 @@ impl Cli {
         let arguments = self.get_arguments().unwrap_or_else(|e| e.exit());
 
         let mode = arguments.value_of(ARG_MODE);
-        let mirror = arguments.value_of_os(ARG_MIRROR);
-        let mountpoint = arguments.value_of_os(ARG_MOUNTPOINT);
+        let mirror = arguments.value_of_os(ARG_MIRROR).unwrap();
+        let mountpoint = arguments.value_of_os(ARG_MOUNTPOINT).unwrap();
         let blocksize = value_t!(arguments, ARG_BLOCKSIZE, u64);
+
+        {
+            let mirror = Path::new(mirror);
+            let mountpoint = Path::new(mountpoint);
+
+            if !mirror.exists() {
+                panic!("Mirror path does not exist: {:?}", mirror)
+            }
+
+            if !mountpoint.exists() {
+                panic!("Mountpoint path does not exist: {:?}", mountpoint)
+            }
+
+            if mirror
+                .canonicalize()
+                .unwrap()
+                .starts_with(mountpoint.canonicalize().unwrap())
+            {
+                panic!(
+                    "Mirror must not be in a subfolder of mountpoint: {:?}",
+                    mountpoint
+                )
+            }
+        }
 
         let fuse_options = arguments
             .values_of_os(ARG_FUSE_OPTIONS)
@@ -60,15 +85,15 @@ impl Cli {
 
         let _session = match (self, mode) {
             (Cli::CatFS, _) | (Cli::SCFS, Some("cat")) => {
-                let fs = CatFS::new(mirror.unwrap());
-                mount(fs, &mountpoint.unwrap(), fuse_options)
+                let fs = CatFS::new(mirror);
+                mount(fs, &mountpoint, fuse_options)
             }
 
             (Cli::SplitFS, _) | (Cli::SCFS, Some("split")) => {
                 let blocksize = blocksize.unwrap_or_else(|e| e.exit());
                 let config = Config::default().blocksize(blocksize);
-                let fs = SplitFS::new(mirror.unwrap(), config);
-                mount(fs, &mountpoint.unwrap(), fuse_options)
+                let fs = SplitFS::new(mirror, config);
+                mount(fs, &mountpoint, fuse_options)
             }
 
             _ => unreachable!(),
