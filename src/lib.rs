@@ -237,6 +237,8 @@ const INO_OUTSIDE: u64 = 0;
 const INO_ROOT: u64 = 1;
 const INO_CONFIG: u64 = 2;
 
+type DropHookFn = Box<dyn Fn() + Send + 'static>;
+
 fn convert_filetype(ft: fs::FileType) -> Option<FileType> {
     if ft.is_dir() {
         Some(FileType::Directory)
