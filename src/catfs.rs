@@ -13,20 +13,21 @@ use libc::ENOENT;
 use rusqlite::{params, Connection, Error, NO_PARAMS};
 
 use crate::{
-    convert_filetype, convert_metadata_to_attr, Config, FileHandle, FileInfo, FileInfoRow,
-    CONFIG_FILE_NAME, INO_OUTSIDE, INO_ROOT, STMT_CREATE, STMT_CREATE_INDEX_PARENT_INO_FILE_NAME,
-    STMT_INSERT, STMT_QUERY_BY_INO, STMT_QUERY_BY_PARENT_INO,
-    STMT_QUERY_BY_PARENT_INO_AND_FILENAME, TTL,
+    convert_filetype, convert_metadata_to_attr, Config, DropHookFn, FileHandle, FileInfo,
+    FileInfoRow, CONFIG_FILE_NAME, INO_OUTSIDE, INO_ROOT, STMT_CREATE,
+    STMT_CREATE_INDEX_PARENT_INO_FILE_NAME, STMT_INSERT, STMT_QUERY_BY_INO,
+    STMT_QUERY_BY_PARENT_INO, STMT_QUERY_BY_PARENT_INO_AND_FILENAME, TTL,
 };
 
 pub struct CatFS {
     file_db: Connection,
     file_handles: HashMap<u64, Vec<FileHandle>>,
     config: Config,
+    drop_hook: DropHookFn,
 }
 
 impl CatFS {
-    pub fn new(mirror: &OsStr) -> Self {
+    pub fn new(mirror: &OsStr, drop_hook: DropHookFn) -> Self {
         let config = serde_json::from_str(
             &fs::read_to_string(Path::new(&mirror).join(CONFIG_FILE_NAME))
                 .expect("SCFS config file not found"),
@@ -58,6 +59,7 @@ impl CatFS {
             file_db,
             file_handles,
             config,
+            drop_hook,
         }
     }
 
@@ -201,6 +203,12 @@ impl CatFS {
                 CatFS::populate(&file_db, entry.path(), ino);
             }
         }
+    }
+}
+
+impl Drop for CatFS {
+    fn drop(&mut self) {
+        &(self.drop_hook)();
     }
 }
 
@@ -464,7 +472,7 @@ mod tests {
             symlink(&target, mirror.path().join(&link_name))?;
         }
 
-        let fs = CatFS::new(mirror.path().as_os_str());
+        let fs = CatFS::new(mirror.path().as_os_str(), Box::new(|| ()));
 
         let session = mount(fs, &mountpoint, Vec::new());
 

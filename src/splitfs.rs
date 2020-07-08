@@ -13,8 +13,8 @@ use libc::ENOENT;
 use rusqlite::{params, Connection, Error, NO_PARAMS};
 
 use crate::{
-    convert_filetype, convert_metadata_to_attr, Config, FileHandle, FileInfo, FileInfoRow,
-    CONFIG_FILE_NAME, INO_CONFIG, INO_OUTSIDE, INO_ROOT, STMT_CREATE,
+    convert_filetype, convert_metadata_to_attr, Config, DropHookFn, FileHandle, FileInfo,
+    FileInfoRow, CONFIG_FILE_NAME, INO_CONFIG, INO_OUTSIDE, INO_ROOT, STMT_CREATE,
     STMT_CREATE_INDEX_PARENT_INO_FILE_NAME, STMT_INSERT, STMT_QUERY_BY_INO,
     STMT_QUERY_BY_PARENT_INO, STMT_QUERY_BY_PARENT_INO_AND_FILENAME, TTL,
 };
@@ -24,10 +24,11 @@ pub struct SplitFS {
     file_handles: HashMap<u64, FileHandle>,
     config: Config,
     config_json: String,
+    drop_hook: DropHookFn,
 }
 
 impl SplitFS {
-    pub fn new(mirror: &OsStr, config: Config) -> Self {
+    pub fn new(mirror: &OsStr, config: Config, drop_hook: DropHookFn) -> Self {
         let file_db = Connection::open_in_memory().unwrap();
 
         file_db.execute(STMT_CREATE, NO_PARAMS).unwrap();
@@ -47,6 +48,7 @@ impl SplitFS {
             file_handles,
             config,
             config_json,
+            drop_hook,
         }
     }
 
@@ -219,6 +221,12 @@ impl SplitFS {
 
             _ => {}
         }
+    }
+}
+
+impl Drop for SplitFS {
+    fn drop(&mut self) {
+        &(self.drop_hook)();
     }
 }
 
@@ -487,7 +495,11 @@ mod tests {
             symlink(&target, mirror.path().join(&link_name))?;
         }
 
-        let fs = SplitFS::new(mirror.path().as_os_str(), config.unwrap_or_default());
+        let fs = SplitFS::new(
+            mirror.path().as_os_str(),
+            config.unwrap_or_default(),
+            Box::new(|| ()),
+        );
 
         let session = mount(fs, &mountpoint, Vec::new());
 

@@ -78,21 +78,28 @@ impl Cli {
 
         let (tx_quitter, rx_quitter) = channel();
 
-        ctrlc::set_handler(move || {
-            tx_quitter.send(true).unwrap();
-        })
-        .expect("Error setting Ctrl-C handler");
+        {
+            let tx_quitter = tx_quitter.clone();
+            ctrlc::set_handler(move || {
+                tx_quitter.send(true).unwrap();
+            })
+            .expect("Error setting Ctrl-C handler");
+        }
+
+        let drop_hook = Box::new(move || {
+            tx_quitter.send(true).unwrap_or(());
+        });
 
         let _session = match (self, mode) {
             (Cli::CatFS, _) | (Cli::SCFS, Some("cat")) => {
-                let fs = CatFS::new(mirror);
+                let fs = CatFS::new(mirror, drop_hook);
                 mount(fs, &mountpoint, fuse_options)
             }
 
             (Cli::SplitFS, _) | (Cli::SCFS, Some("split")) => {
                 let blocksize = blocksize.unwrap_or_else(|e| e.exit());
                 let config = Config::default().blocksize(blocksize);
-                let fs = SplitFS::new(mirror, config);
+                let fs = SplitFS::new(mirror, config, drop_hook);
                 mount(fs, &mountpoint, fuse_options)
             }
 
