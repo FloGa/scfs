@@ -10,13 +10,12 @@ use fuse::{
     ReplyOpen, Request,
 };
 use libc::ENOENT;
-use rusqlite::{params, Connection, Error, NO_PARAMS};
+use rusqlite::{params, Connection, NO_PARAMS};
 
 use crate::{
     convert_filetype, convert_metadata_to_attr, Config, DropHookFn, FileHandle, FileInfo,
-    FileInfoRow, CONFIG_FILE_NAME, INO_CONFIG, INO_OUTSIDE, INO_ROOT, STMT_CREATE,
-    STMT_CREATE_INDEX_PARENT_INO_FILE_NAME, STMT_INSERT, STMT_QUERY_BY_INO,
-    STMT_QUERY_BY_PARENT_INO, STMT_QUERY_BY_PARENT_INO_AND_FILENAME, TTL,
+    FileInfoRow, Shared, CONFIG_FILE_NAME, INO_CONFIG, INO_OUTSIDE, INO_ROOT, STMT_CREATE,
+    STMT_CREATE_INDEX_PARENT_INO_FILE_NAME, STMT_INSERT, STMT_QUERY_BY_PARENT_INO, TTL,
 };
 
 pub struct SplitFS {
@@ -27,71 +26,9 @@ pub struct SplitFS {
     drop_hook: DropHookFn,
 }
 
-impl SplitFS {
-    pub fn new(mirror: &OsStr, config: Config, drop_hook: DropHookFn) -> Self {
-        let file_db = Connection::open_in_memory().unwrap();
-
-        file_db.execute(STMT_CREATE, NO_PARAMS).unwrap();
-
-        SplitFS::populate(&file_db, &mirror, &config, INO_OUTSIDE);
-
-        file_db
-            .execute(STMT_CREATE_INDEX_PARENT_INO_FILE_NAME, NO_PARAMS)
-            .unwrap();
-
-        let file_handles = Default::default();
-
-        let config_json = serde_json::to_string(&config).unwrap();
-
-        SplitFS {
-            file_db,
-            file_handles,
-            config,
-            config_json,
-            drop_hook,
-        }
-    }
-
-    fn get_file_info_from_ino(&self, ino: u64) -> Result<FileInfo, Error> {
-        let ino = FileInfoRow::from(FileInfo::with_ino(ino)).ino;
-
-        let mut stmt = self.file_db.prepare_cached(STMT_QUERY_BY_INO).unwrap();
-
-        let file_info = stmt
-            .query_map(params![ino], |row| Ok(FileInfo::from(row)))?
-            .next()
-            .unwrap();
-        file_info
-    }
-
-    fn get_file_info_from_parent_ino_and_file_name(
-        &self,
-        parent_ino: u64,
-        file_name: OsString,
-    ) -> Result<FileInfo, Error> {
-        let parent_ino = FileInfoRow::from(FileInfo::with_parent_ino(parent_ino)).parent_ino;
-
-        let mut stmt = self
-            .file_db
-            .prepare_cached(STMT_QUERY_BY_PARENT_INO_AND_FILENAME)
-            .unwrap();
-
-        let file_name = FileInfo::default()
-            .file_name(file_name)
-            .into_file_info_row()
-            .file_name;
-
-        let file_info = stmt
-            .query_map(params![parent_ino, file_name], |row| {
-                Ok(FileInfo::from(row))
-            })
-            .unwrap()
-            .next();
-
-        match file_info {
-            Some(f) => Ok(f.unwrap()),
-            None => Err(Error::QueryReturnedNoRows),
-        }
+impl Shared for SplitFS {
+    fn file_db(&self) -> &Connection {
+        &self.file_db
     }
 
     fn get_attr_from_file_info(&self, file_info: &FileInfo) -> FileAttr {
@@ -125,6 +62,32 @@ impl SplitFS {
                 attr.size - (file_info.part - 1) * self.config.blocksize,
             );
             attr
+        }
+    }
+}
+
+impl SplitFS {
+    pub fn new(mirror: &OsStr, config: Config, drop_hook: DropHookFn) -> Self {
+        let file_db = Connection::open_in_memory().unwrap();
+
+        file_db.execute(STMT_CREATE, NO_PARAMS).unwrap();
+
+        SplitFS::populate(&file_db, &mirror, &config, INO_OUTSIDE);
+
+        file_db
+            .execute(STMT_CREATE_INDEX_PARENT_INO_FILE_NAME, NO_PARAMS)
+            .unwrap();
+
+        let file_handles = Default::default();
+
+        let config_json = serde_json::to_string(&config).unwrap();
+
+        SplitFS {
+            file_db,
+            file_handles,
+            config,
+            config_json,
+            drop_hook,
         }
     }
 
@@ -238,14 +201,7 @@ impl Filesystem for SplitFS {
             return;
         }
 
-        let file_info =
-            self.get_file_info_from_parent_ino_and_file_name(parent, OsString::from(name));
-        if let Ok(file_info) = file_info {
-            let attr = self.get_attr_from_file_info(&file_info);
-            reply.entry(&TTL, &attr, 0);
-        } else {
-            reply.error(ENOENT);
-        }
+        Shared::lookup(self, _req, parent, name, reply);
     }
 
     fn getattr(&mut self, _req: &Request, ino: u64, reply: ReplyAttr) {
@@ -255,20 +211,11 @@ impl Filesystem for SplitFS {
             return;
         }
 
-        let file_info = self.get_file_info_from_ino(ino);
-        if let Ok(file_info) = file_info {
-            let attr = self.get_attr_from_file_info(&file_info);
-            reply.attr(&TTL, &attr)
-        } else {
-            reply.error(ENOENT)
-        }
+        Shared::getattr(self, _req, ino, reply);
     }
 
     fn readlink(&mut self, _req: &Request, ino: u64, reply: ReplyData) {
-        let path = self.get_file_info_from_ino(ino).unwrap().path;
-        let target = fs::read_link(path).unwrap();
-        let target = target.to_str().unwrap().as_bytes();
-        reply.data(target);
+        Shared::readlink(self, _req, ino, reply);
     }
 
     fn open(&mut self, _req: &Request, ino: u64, _flags: u32, reply: ReplyOpen) {
@@ -455,15 +402,15 @@ impl Filesystem for SplitFS {
 
 #[cfg(test)]
 mod tests {
-    use std::fs::read;
-    use std::io::Write;
-    use std::os::unix::fs::symlink;
+    use std::fs::{read, DirEntry};
+    use std::path::PathBuf;
 
     use fuse::BackgroundSession;
     use rand::{Rng, RngCore};
     use tempfile::{tempdir, TempDir};
 
     use crate::mount;
+    use crate::shared::tests::{check_symlinks, create_files_and_symlinks};
 
     use super::*;
 
@@ -484,16 +431,7 @@ mod tests {
         let mirror = tempdir()?;
         let mountpoint = tempdir()?;
 
-        for (file_name, data) in files {
-            let path = mirror.path().join(file_name);
-            fs::create_dir_all(path.parent().unwrap())?;
-            let mut file = File::create(&path)?;
-            file.write_all(&data)?;
-        }
-
-        for (link_name, target) in symlinks {
-            symlink(&target, mirror.path().join(&link_name))?;
-        }
+        create_files_and_symlinks(mirror.path(), &files, &symlinks)?;
 
         let fs = SplitFS::new(
             mirror.path().as_os_str(),
@@ -529,6 +467,46 @@ mod tests {
             .collect::<Vec<_>>();
 
         mount_and_create_files(files, config)
+    }
+
+    fn list_files_in_path(path: PathBuf) -> Vec<PathBuf> {
+        fs::read_dir(path)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect::<Vec<_>>()
+    }
+
+    fn list_files_in_directories(dirs: &Vec<&DirEntry>) -> Vec<(String, Vec<PathBuf>)> {
+        dirs.iter()
+            .map(|item| {
+                let file_name = item.file_name().into_string().unwrap();
+                let files = list_files_in_path(item.path());
+                (file_name, files)
+            })
+            .collect::<Vec<_>>()
+    }
+
+    fn check_files(num_files: usize, dirs: &Vec<&DirEntry>, files: &Vec<(String, Vec<PathBuf>)>) {
+        assert_eq!(dirs.len(), num_files);
+
+        assert_eq!(
+            files.iter().filter(|&(_, files)| files.len() == 1).count(),
+            num_files
+        );
+
+        assert_eq!(
+            files
+                .iter()
+                .filter(|&(file_name, files)| {
+                    let contents = files
+                        .iter()
+                        .flat_map(|entry| fs::read(entry).unwrap())
+                        .collect::<Vec<_>>();
+                    file_name.clone().into_bytes() == contents
+                })
+                .count(),
+            num_files
+        );
     }
 
     #[test]
@@ -585,6 +563,8 @@ mod tests {
 
     #[test]
     fn test_empty_file() -> Result<(), std::io::Error> {
+        let num_files = 1;
+
         let files = vec![("empty_file".to_string(), vec![])];
 
         let session = mount_and_create_files(files, None)?;
@@ -593,7 +573,7 @@ mod tests {
             .map(|entry| entry.unwrap())
             .collect::<Vec<_>>();
 
-        assert_eq!(entries.len(), 1 + 1);
+        assert_eq!(entries.len(), num_files + 1);
 
         assert_eq!(
             entries
@@ -608,23 +588,13 @@ mod tests {
             .filter(|item| item.path().is_dir())
             .collect::<Vec<_>>();
 
-        assert_eq!(dirs.len(), 1);
+        assert_eq!(dirs.len(), num_files);
 
-        let files = dirs
-            .iter()
-            .map(|item| {
-                let file_name = item.file_name().into_string().unwrap();
-                let files = fs::read_dir(item.path())
-                    .unwrap()
-                    .map(|entry| entry.unwrap().path())
-                    .collect::<Vec<_>>();
-                (file_name, files)
-            })
-            .collect::<Vec<_>>();
+        let files = list_files_in_directories(&dirs);
 
         assert_eq!(
             files.iter().filter(|&(_, files)| files.len() == 1).count(),
-            1
+            num_files
         );
 
         assert_eq!(
@@ -638,7 +608,7 @@ mod tests {
                     contents.is_empty()
                 })
                 .count(),
-            1
+            num_files
         );
 
         Ok(())
@@ -673,38 +643,9 @@ mod tests {
             .filter(|item| item.path().is_dir())
             .collect::<Vec<_>>();
 
-        assert_eq!(dirs.len(), num_files);
+        let files = list_files_in_directories(&dirs);
 
-        let files = dirs
-            .iter()
-            .map(|item| {
-                let file_name = item.file_name().into_string().unwrap();
-                let files = fs::read_dir(item.path())
-                    .unwrap()
-                    .map(|entry| entry.unwrap().path())
-                    .collect::<Vec<_>>();
-                (file_name, files)
-            })
-            .collect::<Vec<_>>();
-
-        assert_eq!(
-            files.iter().filter(|&(_, files)| files.len() == 1).count(),
-            num_files
-        );
-
-        assert_eq!(
-            files
-                .iter()
-                .filter(|&(file_name, files)| {
-                    let contents = files
-                        .iter()
-                        .flat_map(|entry| fs::read(entry).unwrap())
-                        .collect::<Vec<_>>();
-                    file_name.clone().into_bytes() == contents
-                })
-                .count(),
-            num_files
-        );
+        check_files(num_files, &dirs, &files);
 
         Ok(())
     }
@@ -753,8 +694,6 @@ mod tests {
             .filter(|item| item.path().is_dir())
             .collect::<Vec<_>>();
 
-        assert_eq!(dirs.len(), num_files);
-
         let files = dirs
             .iter()
             .map(|item| {
@@ -773,24 +712,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        assert_eq!(
-            files.iter().filter(|&(_, files)| files.len() == 1).count(),
-            num_files
-        );
-
-        assert_eq!(
-            files
-                .iter()
-                .filter(|&(file_name, files)| {
-                    let contents = files
-                        .iter()
-                        .flat_map(|entry| fs::read(entry).unwrap())
-                        .collect::<Vec<_>>();
-                    file_name.clone().into_bytes() == contents
-                })
-                .count(),
-            num_files
-        );
+        check_files(num_files, &dirs, &files);
 
         Ok(())
     }
@@ -825,10 +747,7 @@ mod tests {
 
         let dir = dirs.get(0).unwrap();
 
-        let files = fs::read_dir(dir.path())
-            .unwrap()
-            .map(|entry| entry.unwrap().path())
-            .collect::<Vec<_>>();
+        let files = list_files_in_path(dir.path());
 
         assert_eq!(files.len(), data.len());
 
@@ -876,10 +795,7 @@ mod tests {
 
         let dir = dirs.get(0).unwrap();
 
-        let files = fs::read_dir(dir.path())
-            .unwrap()
-            .map(|entry| entry.unwrap().path())
-            .collect::<Vec<_>>();
+        let files = list_files_in_path(dir.path());
 
         assert_eq!(
             files.len(),
@@ -942,8 +858,6 @@ mod tests {
             .filter(|item| item.file_type().unwrap().is_symlink())
             .collect::<Vec<_>>();
 
-        assert_eq!(symlinks_found.len(), symlink_map.len());
-
         assert_eq!(
             read(symlinks_found.first().unwrap().path())?,
             serde_json::to_string(&Config::default())
@@ -951,18 +865,7 @@ mod tests {
                 .into_bytes()
         );
 
-        for symlink in symlinks_found {
-            let symlink = symlink.path();
-            let link_name = symlink.file_name().unwrap().to_str().unwrap();
-            let target = symlink_map.remove(link_name);
-            assert_ne!(target, None);
-            let target = target.unwrap();
-            assert_eq!(fs::read_link(symlink)?.to_str().unwrap(), target);
-        }
-
-        assert!(symlink_map.is_empty());
-
-        Ok(())
+        check_symlinks(&mut symlink_map, &symlinks_found)
     }
 
     #[test]
@@ -1001,8 +904,6 @@ mod tests {
             .filter(|item| item.file_type().unwrap().is_symlink())
             .collect::<Vec<_>>();
 
-        assert_eq!(symlinks_found.len(), symlink_map.len());
-
         let parts = symlinks_found
             .first()
             .unwrap()
@@ -1018,18 +919,7 @@ mod tests {
             files.first().unwrap().1
         );
 
-        for symlink in symlinks_found {
-            let symlink = symlink.path();
-            let link_name = symlink.file_name().unwrap().to_str().unwrap();
-            let target = symlink_map.remove(link_name);
-            assert_ne!(target, None);
-            let target = target.unwrap();
-            assert_eq!(fs::read_link(symlink)?.to_str().unwrap(), target);
-        }
-
-        assert!(symlink_map.is_empty());
-
-        Ok(())
+        check_symlinks(&mut symlink_map, &symlinks_found)
     }
 
     #[test]
@@ -1064,22 +954,9 @@ mod tests {
             .filter(|item| item.file_type().unwrap().is_symlink())
             .collect::<Vec<_>>();
 
-        assert_eq!(symlinks_found.len(), symlink_map.len());
-
         assert!(symlinks_found.first().unwrap().path().is_dir());
 
-        for symlink in symlinks_found {
-            let symlink = symlink.path();
-            let link_name = symlink.file_name().unwrap().to_str().unwrap();
-            let target = symlink_map.remove(link_name);
-            assert_ne!(target, None);
-            let target = target.unwrap();
-            assert_eq!(fs::read_link(symlink)?.to_str().unwrap(), target);
-        }
-
-        assert!(symlink_map.is_empty());
-
-        Ok(())
+        check_symlinks(&mut symlink_map, &symlinks_found)
     }
 
     #[test]
@@ -1116,19 +993,6 @@ mod tests {
             .filter(|item| item.file_type().unwrap().is_symlink())
             .collect::<Vec<_>>();
 
-        assert_eq!(symlinks_found.len(), symlink_map.len());
-
-        for symlink in symlinks_found {
-            let symlink = symlink.path();
-            let link_name = symlink.file_name().unwrap().to_str().unwrap();
-            let target = symlink_map.remove(link_name);
-            assert_ne!(target, None);
-            let target = target.unwrap();
-            assert_eq!(fs::read_link(symlink)?.to_str().unwrap(), target);
-        }
-
-        assert!(symlink_map.is_empty());
-
-        Ok(())
+        check_symlinks(&mut symlink_map, &symlinks_found)
     }
 }
