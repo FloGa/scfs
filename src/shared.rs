@@ -82,3 +82,53 @@ pub trait Shared {
         reply.data(target);
     }
 }
+
+#[cfg(test)]
+pub mod tests {
+    use std::collections::hash_map::RandomState;
+    use std::collections::HashMap;
+    use std::fs;
+    use std::fs::{DirEntry, File};
+    use std::io::Write;
+    use std::os::unix::fs::symlink;
+    use std::path::Path;
+
+    pub fn create_files_and_symlinks(
+        path: &Path,
+        files: &Vec<(String, Vec<u8>)>,
+        symlinks: &Vec<(String, String)>,
+    ) -> Result<(), std::io::Error> {
+        for (file_name, data) in files {
+            let path = path.join(file_name);
+            fs::create_dir_all(path.parent().unwrap())?;
+            let mut file = File::create(&path)?;
+            file.write_all(&data)?;
+        }
+
+        for (link_name, target) in symlinks {
+            symlink(&target, path.join(&link_name))?;
+        }
+
+        Ok(())
+    }
+
+    pub fn check_symlinks(
+        symlink_map: &mut HashMap<String, String, RandomState>,
+        symlinks_found: &Vec<&DirEntry>,
+    ) -> Result<(), std::io::Error> {
+        assert_eq!(symlinks_found.len(), symlink_map.len());
+
+        for symlink in symlinks_found {
+            let symlink = symlink.path();
+            let link_name = symlink.file_name().unwrap().to_str().unwrap();
+            let target = symlink_map.remove(link_name);
+            assert_ne!(target, None);
+            let target = target.unwrap();
+            assert_eq!(fs::read_link(symlink)?.to_str().unwrap(), target);
+        }
+
+        assert!(symlink_map.is_empty());
+
+        Ok(())
+    }
+}

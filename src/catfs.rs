@@ -379,16 +379,16 @@ impl Filesystem for CatFS {
 
 #[cfg(test)]
 mod tests {
-    use std::io::Write;
+    use std::fs::DirEntry;
     use std::iter;
     use std::ops::Deref;
-    use std::os::unix::fs::symlink;
 
     use fuse::BackgroundSession;
     use rand::{thread_rng, Rng, RngCore};
     use tempfile::{tempdir, TempDir};
 
     use crate::mount;
+    use crate::shared::tests::{check_symlinks, create_files_and_symlinks};
 
     use super::*;
 
@@ -408,16 +408,7 @@ mod tests {
         let mirror = tempdir()?;
         let mountpoint = tempdir()?;
 
-        for (file_name, data) in files {
-            let path = mirror.path().join(file_name);
-            fs::create_dir_all(path.parent().unwrap())?;
-            let mut file = File::create(&path)?;
-            file.write_all(&data)?;
-        }
-
-        for (link_name, target) in symlinks {
-            symlink(&target, mirror.path().join(&link_name))?;
-        }
+        create_files_and_symlinks(mirror.path(), &files, &symlinks)?;
 
         let fs = CatFS::new(mirror.path().as_os_str(), Box::new(|| ()));
 
@@ -634,7 +625,7 @@ mod tests {
             config,
         );
 
-        let mut symlink_map = HashMap::new();
+        let mut symlink_map: HashMap<String, String> = HashMap::new();
         symlink_map.insert(
             "link_rel".into(),
             files.first().unwrap().0.split("/").next().unwrap().into(),
@@ -651,12 +642,10 @@ mod tests {
 
         assert_eq!(entries.len(), num_files + symlink_map.len());
 
-        let symlinks_found = entries
+        let symlinks_found: Vec<&DirEntry> = entries
             .iter()
             .filter(|item| item.file_type().unwrap().is_symlink())
             .collect::<Vec<_>>();
-
-        assert_eq!(symlinks_found.len(), symlink_map.len());
 
         let contents = entries
             .iter()
@@ -667,18 +656,7 @@ mod tests {
             .iter()
             .all(|content| content.eq(contents.first().unwrap())));
 
-        for symlink in symlinks_found {
-            let symlink = symlink.path();
-            let link_name = symlink.file_name().unwrap().to_str().unwrap();
-            let target = symlink_map.remove(link_name);
-            assert_ne!(target, None);
-            let target = target.unwrap();
-            assert_eq!(fs::read_link(symlink)?.to_str().unwrap(), target);
-        }
-
-        assert!(symlink_map.is_empty());
-
-        Ok(())
+        check_symlinks(&mut symlink_map, &symlinks_found)
     }
 
     #[test]
@@ -704,22 +682,9 @@ mod tests {
             .filter(|item| item.file_type().unwrap().is_symlink())
             .collect::<Vec<_>>();
 
-        assert_eq!(symlinks_found.len(), symlink_map.len());
-
         assert!(symlinks_found.first().unwrap().path().is_dir());
 
-        for symlink in symlinks_found {
-            let symlink = symlink.path();
-            let link_name = symlink.file_name().unwrap().to_str().unwrap();
-            let target = symlink_map.remove(link_name);
-            assert_ne!(target, None);
-            let target = target.unwrap();
-            assert_eq!(fs::read_link(symlink)?.to_str().unwrap(), target);
-        }
-
-        assert!(symlink_map.is_empty());
-
-        Ok(())
+        check_symlinks(&mut symlink_map, &symlinks_found)
     }
 
     #[test]
@@ -747,19 +712,6 @@ mod tests {
             .filter(|item| item.file_type().unwrap().is_symlink())
             .collect::<Vec<_>>();
 
-        assert_eq!(symlinks_found.len(), symlink_map.len());
-
-        for symlink in symlinks_found {
-            let symlink = symlink.path();
-            let link_name = symlink.file_name().unwrap().to_str().unwrap();
-            let target = symlink_map.remove(link_name);
-            assert_ne!(target, None);
-            let target = target.unwrap();
-            assert_eq!(fs::read_link(symlink)?.to_str().unwrap(), target);
-        }
-
-        assert!(symlink_map.is_empty());
-
-        Ok(())
+        check_symlinks(&mut symlink_map, &symlinks_found)
     }
 }
