@@ -1,4 +1,5 @@
 use std::ffi::OsStr;
+use std::fs;
 use std::path::Path;
 use std::sync::mpsc::channel;
 
@@ -17,6 +18,7 @@ const ARG_BLOCKSIZE: &str = "blocksize";
 const ARG_FUSE_OPTIONS: &str = "fuse_options";
 const ARG_FUSE_OPTIONS_EXTRA: &str = "fuse_options_extra";
 const ARG_DAEMON: &str = "daemon";
+const ARG_MKDIR: &str = "mkdir";
 
 arg_enum! {
     pub enum Cli {
@@ -44,6 +46,7 @@ impl Cli {
         let mountpoint = arguments.value_of_os(ARG_MOUNTPOINT).unwrap();
         let blocksize = value_t!(arguments, ARG_BLOCKSIZE, u64);
         let daemonize = arguments.is_present(ARG_DAEMON);
+        let mkdir = arguments.is_present(ARG_MKDIR);
 
         let (mirror, mountpoint) = {
             let mirror = Path::new(mirror);
@@ -54,7 +57,11 @@ impl Cli {
             }
 
             if !mountpoint.exists() {
-                panic!("Mountpoint path does not exist: {:?}", mountpoint)
+                if mkdir {
+                    fs::create_dir_all(mountpoint).unwrap();
+                } else {
+                    panic!("Mountpoint path does not exist: {:?}", mountpoint)
+                }
             }
 
             let mirror = mirror.canonicalize().unwrap();
@@ -156,6 +163,9 @@ fn args_base<'a, 'b>() -> Vec<Arg<'a, 'b>> {
             .short(&ARG_DAEMON[0..1])
             .long(ARG_DAEMON)
             .help("Run program in background"),
+        Arg::with_name(ARG_MKDIR)
+            .long(ARG_MKDIR)
+            .help("Create mountpoint directory if it does not exist already"),
         Arg::with_name(ARG_FUSE_OPTIONS_EXTRA)
             .help("Additional options, which are passed down to FUSE")
             .multiple(true)
