@@ -10,13 +10,12 @@ use fuse::{
     ReplyOpen, Request,
 };
 use libc::ENOENT;
-use rusqlite::{params, Connection, Error, NO_PARAMS};
+use rusqlite::{params, Connection, NO_PARAMS};
 
 use crate::{
     convert_filetype, convert_metadata_to_attr, Config, DropHookFn, FileHandle, FileInfo,
     FileInfoRow, Shared, CONFIG_FILE_NAME, INO_OUTSIDE, INO_ROOT, STMT_CREATE,
-    STMT_CREATE_INDEX_PARENT_INO_FILE_NAME, STMT_INSERT, STMT_QUERY_BY_INO,
-    STMT_QUERY_BY_PARENT_INO, STMT_QUERY_BY_PARENT_INO_AND_FILENAME, TTL,
+    STMT_CREATE_INDEX_PARENT_INO_FILE_NAME, STMT_INSERT, STMT_QUERY_BY_PARENT_INO,
 };
 
 pub struct CatFS {
@@ -27,6 +26,35 @@ pub struct CatFS {
 }
 
 impl Shared for CatFS {
+    fn file_db(&self) -> &Connection {
+        &self.file_db
+    }
+
+    fn get_attr_from_file_info(&self, file_info: &FileInfo) -> FileAttr {
+        if file_info.vdir {
+            let parts = self.get_files_info_from_parent_ino(file_info.ino);
+            let attrs = parts
+                .iter()
+                .map(|info| {
+                    convert_metadata_to_attr(
+                        fs::symlink_metadata(&info.path).unwrap(),
+                        Some(info.ino),
+                    )
+                })
+                .collect::<Vec<_>>();
+            let mut attr = attrs.get(0).unwrap().clone();
+            attr.ino = file_info.ino;
+            attr.blocks = attrs.iter().map(|attr| attr.blocks).sum();
+            attr.size = attrs.iter().map(|attr| attr.size).sum();
+            attr
+        } else {
+            let attr = convert_metadata_to_attr(
+                fs::symlink_metadata(&file_info.path).unwrap(),
+                Some(file_info.ino),
+            );
+            attr
+        }
+    }
 }
 
 impl CatFS {
@@ -66,18 +94,6 @@ impl CatFS {
         }
     }
 
-    fn get_file_info_from_ino(&self, ino: u64) -> Result<FileInfo, Error> {
-        let ino = FileInfoRow::from(FileInfo::with_ino(ino)).ino;
-
-        let mut stmt = self.file_db.prepare_cached(STMT_QUERY_BY_INO).unwrap();
-
-        let file_info = stmt
-            .query_map(params![ino], |row| Ok(FileInfo::from(row)))?
-            .next()
-            .unwrap();
-        file_info
-    }
-
     fn get_files_info_from_parent_ino(&self, parent_ino: u64) -> Vec<FileInfo> {
         let parent_ino = FileInfoRow::from(FileInfo::with_parent_ino(parent_ino)).parent_ino;
 
@@ -90,62 +106,6 @@ impl CatFS {
             .unwrap()
             .map(|res| res.unwrap())
             .collect()
-    }
-
-    fn get_file_info_from_parent_ino_and_file_name(
-        &self,
-        parent_ino: u64,
-        file_name: OsString,
-    ) -> Result<FileInfo, Error> {
-        let parent_ino = FileInfoRow::from(FileInfo::with_parent_ino(parent_ino)).parent_ino;
-
-        let mut stmt = self
-            .file_db
-            .prepare_cached(STMT_QUERY_BY_PARENT_INO_AND_FILENAME)
-            .unwrap();
-
-        let file_name = FileInfo::default()
-            .file_name(file_name)
-            .into_file_info_row()
-            .file_name;
-
-        let file_info = stmt
-            .query_map(params![parent_ino, file_name], |row| {
-                Ok(FileInfo::from(row))
-            })
-            .unwrap()
-            .next();
-
-        match file_info {
-            Some(f) => Ok(f.unwrap()),
-            None => Err(Error::QueryReturnedNoRows),
-        }
-    }
-
-    fn get_attr_from_file_info(&self, file_info: &FileInfo) -> FileAttr {
-        if file_info.vdir {
-            let parts = self.get_files_info_from_parent_ino(file_info.ino);
-            let attrs = parts
-                .iter()
-                .map(|info| {
-                    convert_metadata_to_attr(
-                        fs::symlink_metadata(&info.path).unwrap(),
-                        Some(info.ino),
-                    )
-                })
-                .collect::<Vec<_>>();
-            let mut attr = attrs.get(0).unwrap().clone();
-            attr.ino = file_info.ino;
-            attr.blocks = attrs.iter().map(|attr| attr.blocks).sum();
-            attr.size = attrs.iter().map(|attr| attr.size).sum();
-            attr
-        } else {
-            let attr = convert_metadata_to_attr(
-                fs::symlink_metadata(&file_info.path).unwrap(),
-                Some(file_info.ino),
-            );
-            attr
-        }
     }
 
     fn populate<P: AsRef<Path>>(file_db: &Connection, path: P, parent_ino: u64) {
@@ -217,31 +177,15 @@ impl Drop for CatFS {
 
 impl Filesystem for CatFS {
     fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
-        let file_info =
-            self.get_file_info_from_parent_ino_and_file_name(parent, OsString::from(name));
-        if let Ok(file_info) = file_info {
-            let attr = self.get_attr_from_file_info(&file_info);
-            reply.entry(&TTL, &attr, 0);
-        } else {
-            reply.error(ENOENT);
-        }
+        Shared::lookup(self, _req, parent, name, reply);
     }
 
     fn getattr(&mut self, _req: &Request, ino: u64, reply: ReplyAttr) {
-        let file_info = self.get_file_info_from_ino(ino);
-        if let Ok(file_info) = file_info {
-            let attr = self.get_attr_from_file_info(&file_info);
-            reply.attr(&TTL, &attr)
-        } else {
-            reply.error(ENOENT)
-        }
+        Shared::getattr(self, _req, ino, reply);
     }
 
     fn readlink(&mut self, _req: &Request, ino: u64, reply: ReplyData) {
-        let path = self.get_file_info_from_ino(ino).unwrap().path;
-        let target = fs::read_link(path).unwrap();
-        let target = target.to_str().unwrap().as_bytes();
-        reply.data(target);
+        Shared::readlink(self, _req, ino, reply);
     }
 
     fn open(&mut self, _req: &Request, ino: u64, _flags: u32, reply: ReplyOpen) {

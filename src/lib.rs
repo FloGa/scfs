@@ -298,7 +298,7 @@ struct FileHandle {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-struct FileInfo {
+pub struct FileInfo {
     ino: u64,
     parent_ino: u64,
     path: OsString,
