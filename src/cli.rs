@@ -6,6 +6,7 @@ use clap::{
     arg_enum, crate_authors, crate_description, crate_name, crate_version, value_t, App, Arg,
     ArgMatches, Result,
 };
+use daemonize::Daemonize;
 
 use crate::{mount, CatFS, Config, SplitFS};
 
@@ -15,6 +16,7 @@ const ARG_MOUNTPOINT: &str = "mountpoint";
 const ARG_BLOCKSIZE: &str = "blocksize";
 const ARG_FUSE_OPTIONS: &str = "fuse_options";
 const ARG_FUSE_OPTIONS_EXTRA: &str = "fuse_options_extra";
+const ARG_DAEMON: &str = "daemon";
 
 arg_enum! {
     pub enum Cli {
@@ -41,8 +43,9 @@ impl Cli {
         let mirror = arguments.value_of_os(ARG_MIRROR).unwrap();
         let mountpoint = arguments.value_of_os(ARG_MOUNTPOINT).unwrap();
         let blocksize = value_t!(arguments, ARG_BLOCKSIZE, u64);
+        let daemonize = arguments.is_present(ARG_DAEMON);
 
-        {
+        let (mirror, mountpoint) = {
             let mirror = Path::new(mirror);
             let mountpoint = Path::new(mountpoint);
 
@@ -54,17 +57,18 @@ impl Cli {
                 panic!("Mountpoint path does not exist: {:?}", mountpoint)
             }
 
-            if mirror
-                .canonicalize()
-                .unwrap()
-                .starts_with(mountpoint.canonicalize().unwrap())
-            {
+            let mirror = mirror.canonicalize().unwrap();
+            let mountpoint = mountpoint.canonicalize().unwrap();
+
+            if mirror.starts_with(&mountpoint) {
                 panic!(
                     "Mirror must not be in a subfolder of mountpoint: {:?}",
                     mountpoint
                 )
             }
-        }
+
+            (mirror.into_os_string(), mountpoint.into_os_string())
+        };
 
         let fuse_options = arguments
             .values_of_os(ARG_FUSE_OPTIONS)
@@ -92,14 +96,20 @@ impl Cli {
 
         let _session = match (self, mode) {
             (Cli::CatFS, _) | (Cli::SCFS, Some("cat")) => {
-                let fs = CatFS::new(mirror, drop_hook);
+                let fs = CatFS::new(&mirror, drop_hook);
+                if daemonize {
+                    Daemonize::new().start().expect("Failed to daemonize.");
+                }
                 mount(fs, &mountpoint, fuse_options)
             }
 
             (Cli::SplitFS, _) | (Cli::SCFS, Some("split")) => {
                 let blocksize = blocksize.unwrap_or_else(|e| e.exit());
                 let config = Config::default().blocksize(blocksize);
-                let fs = SplitFS::new(mirror, config, drop_hook);
+                let fs = SplitFS::new(&mirror, config, drop_hook);
+                if daemonize {
+                    Daemonize::new().start().expect("Failed to daemonize.");
+                }
                 mount(fs, &mountpoint, fuse_options)
             }
 
@@ -142,6 +152,10 @@ fn args_base<'a, 'b>() -> Vec<Arg<'a, 'b>> {
         Arg::with_name(ARG_MOUNTPOINT)
             .help("Defines the mountpoint, where the mirror will be accessible")
             .required(true),
+        Arg::with_name(ARG_DAEMON)
+            .short(&ARG_DAEMON[0..1])
+            .long(ARG_DAEMON)
+            .help("Run program in background"),
         Arg::with_name(ARG_FUSE_OPTIONS_EXTRA)
             .help("Additional options, which are passed down to FUSE")
             .multiple(true)
