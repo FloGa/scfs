@@ -180,9 +180,11 @@ use serde::{Deserialize, Serialize};
 use time::Timespec;
 
 pub use catfs::CatFS;
+pub use shared::Shared;
 pub use splitfs::SplitFS;
 
 mod catfs;
+mod shared;
 mod splitfs;
 
 pub mod cli;

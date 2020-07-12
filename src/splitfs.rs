@@ -14,7 +14,7 @@ use rusqlite::{params, Connection, Error, NO_PARAMS};
 
 use crate::{
     convert_filetype, convert_metadata_to_attr, Config, DropHookFn, FileHandle, FileInfo,
-    FileInfoRow, CONFIG_FILE_NAME, INO_CONFIG, INO_OUTSIDE, INO_ROOT, STMT_CREATE,
+    FileInfoRow, Shared, CONFIG_FILE_NAME, INO_CONFIG, INO_OUTSIDE, INO_ROOT, STMT_CREATE,
     STMT_CREATE_INDEX_PARENT_INO_FILE_NAME, STMT_INSERT, STMT_QUERY_BY_INO,
     STMT_QUERY_BY_PARENT_INO, STMT_QUERY_BY_PARENT_INO_AND_FILENAME, TTL,
 };
@@ -25,6 +25,9 @@ pub struct SplitFS {
     config: Config,
     config_json: String,
     drop_hook: DropHookFn,
+}
+
+impl Shared for SplitFS {
 }
 
 impl SplitFS {
