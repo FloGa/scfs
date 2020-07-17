@@ -57,7 +57,7 @@ and a certain knowledge of the language.
 
 SCFS can be installed easily through Cargo via `crates.io`:
 
-``` text
+```shell script
 cargo install scfs
 ```
 
@@ -67,14 +67,14 @@ cargo install scfs
 
 To mount a directory with SplitFS, use the following form:
 
-``` text
+```shell script
 scfs --mode=split <base directory> <mount point>
 ```
 
 Since version 0.8.0 this can be simplified by using the dedicated `splitfs`
 binary:
 
-``` text
+```shell script
 splitfs <base directory> <mount point>
 ```
 
@@ -86,7 +86,7 @@ Since version 0.7.0, it is possible to use a custom block size for the file
 fragments. For example, to use 1&nbsp;MB chunks instead of the default size of
 2&nbsp;MB, you would go with:
 
-``` text
+```shell script
 splitfs --blocksize=1048576 <base directory> <mount point>
 ```
 
@@ -95,7 +95,7 @@ Where 1048576 is 1024 * 1024, so one megabyte in bytes.
 You can even leverage the calculating power of your Shell, like for example in
 Bash:
 
-``` text
+```shell script
 splitfs --blocksize=$((1024 * 1024)) <base directory> <mount point>
 ```
 
@@ -107,14 +107,14 @@ metadata table grows too large.
 
 To mount a directory with CatFS, use the following form:
 
-``` text
+```shell script
 scfs --mode=cat <base directory> <mount point>
 ```
 
 Since version 0.8.0 this can be simplified by using the dedicated `catfs`
 binary:
 
-``` text
+```shell script
 catfs <base directory> <mount point>
 ```
 
@@ -135,7 +135,7 @@ other FUSE based filesystems like EncFS.
     
 These two calls are equivalent:
     
-``` text
+```shell script
 scfs --mode=split -o nonempty mirror mountpoint
 scfs --mode=split mirror mountpoint -- nonempty
 ```
