@@ -183,7 +183,7 @@
 //! -   It should work an all UNIX based systems, like Linux and maybe some MacOS
 //!     versions, however without MacOS specific file attributes. But definitely
 //!     not on Windows, since this would need special handling of system calls,
-//!     which I haven't had time to care of yet.
+//!     which I haven't had time to take care of yet.
 //!
 //! -   It can only work with directories, regular files, and symlinks (since
 //!     v0.8.0). Every other file types (device files, pipes, and so on) will be
