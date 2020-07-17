@@ -44,9 +44,6 @@
 //! developing SCFS. CatFS will concatenate chunked files transparently and
 //! present them as complete files again.
 //!
-//! CatFS is included in SCFS since version 0.4.0.
-//!
-//!
 //! ### Why Rust?
 //!
 //! I am relatively new to Rust and I thought, the best way to deepen my
@@ -71,8 +68,7 @@
 //! scfs --mode=split <base directory> <mount point>
 //! ```
 //!
-//! Since version 0.8.0 this can be simplified by using the dedicated `splitfs`
-//! binary:
+//! This can be simplified by using the dedicated `splitfs` binary:
 //!
 //! ```shell script
 //! splitfs <base directory> <mount point>
@@ -82,9 +78,9 @@
 //! directory`, replacing each regular file with a directory that contains
 //! enumerated chunks of that file as separate files.
 //!
-//! Since version 0.7.0, it is possible to use a custom block size for the file
-//! fragments. For example, to use 1&nbsp;MB chunks instead of the default size of
-//! 2&nbsp;MB, you would go with:
+//! It is possible to use a custom block size for the file fragments. For example,
+//! to use 1&nbsp;MB chunks instead of the default size of 2&nbsp;MB, you would go
+//! with:
 //!
 //! ```shell script
 //! splitfs --blocksize=1048576 <base directory> <mount point>
@@ -111,8 +107,7 @@
 //! scfs --mode=cat <base directory> <mount point>
 //! ```
 //!
-//! Since version 0.8.0 this can be simplified by using the dedicated `catfs`
-//! binary:
+//! This can be simplified by using the dedicated `catfs` binary:
 //!
 //! ```shell script
 //! catfs <base directory> <mount point>
@@ -126,8 +121,8 @@
 //!
 //! ### Additional FUSE mount options
 //!
-//! Since v0.8.0 it is possible to pass additional mount options to the underlying
-//! FUSE library.
+//! It is possible to pass additional mount options to the underlying FUSE
+//! library.
 //!
 //! SCFS supports two ways of specifying options, either via the "-o" option, or
 //! via additional arguments after a "--" separator. This is in accordance to
@@ -185,10 +180,9 @@
 //!     not on Windows, since this would need special handling of system calls,
 //!     which I haven't had time to take care of yet.
 //!
-//! -   It can only work with directories, regular files, and symlinks (since
-//!     v0.8.0). Every other file types (device files, pipes, and so on) will be
-//!     silently ignored. Since v0.8.0: Not supported file types will no longer
-//!     result in a panic.
+//! -   It can only work with directories, regular files, and symlinks. Every
+//!     other file types (device files, pipes, and so on) will be silently
+//!     ignored.
 //!
 //! -   The base directory will be mounted read-only in the new mount point, and
 //!     SCFS expects that the base directory will not be altered while mounted.
