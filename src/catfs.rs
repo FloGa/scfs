@@ -512,14 +512,7 @@ mod tests {
     fn test_empty_mirror() {
         // Since a valid SplitFS needs a config file, panic if there is no such file
 
-        let session = mount_and_create_files(&Vec::new()).unwrap();
-
-        let entries = fs::read_dir(&session.mountpoint)
-            .unwrap()
-            .map(|entry| entry.unwrap())
-            .collect::<Vec<_>>();
-
-        assert_eq!(entries.len(), 0);
+        mount_and_create_files(&Vec::new()).unwrap();
     }
 
     #[test]
@@ -547,14 +540,7 @@ mod tests {
 
         let files = vec![(CONFIG_FILE_NAME.to_string(), "{}".into())];
 
-        let session = mount_and_create_files(&files).unwrap();
-
-        let entries = fs::read_dir(&session.mountpoint)
-            .unwrap()
-            .map(|entry| entry.unwrap())
-            .collect::<Vec<_>>();
-
-        assert_eq!(entries.len(), 0);
+        mount_and_create_files(&files).unwrap();
     }
 
     #[test]
