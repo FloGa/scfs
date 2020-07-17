@@ -142,6 +142,33 @@
 //!
 //! Of course, these methods also work in the `splitfs` and `catfs` binaries.
 //!
+//! ### Daemon mode
+//!
+//! Originally, SCFS was meant to be run in the foreground. This proved to be
+//! annoying if one wants to use the same terminal for further work. Granted, one
+//! could always use features of their Shell to send the process to the
+//! background, but then you have a background process that might accidentally be
+//! killed if the user closes terminal. Furthermore, SCFS originally did not
+//! terminate cleanly if the user unmounted it by external means.
+//!
+//! Since v0.9.0, SCFS natively supports daemon mode, in that the program changes
+//! its working directory to `"/"` and then forks itself into a true daemon
+//! process, independent of the running terminal.
+//!
+//! ```shell script
+//! splitfs --daemon mirror mountpoint
+//! ```
+//!
+//! Note that `mirror` and `mountpoint` are resolved *before* changing the working
+//! directory, so they can still be given relative to the current working
+//! directory.
+//!
+//! To unmount, `fusermount` can be used:
+//!
+//! ```shell script
+//! fusermount -u mountpoint
+//! ```
+//!
 //! ## Limitations
 //!
 //! I consider this project no longer a "raw prototype" and I am dog-fooding it,
