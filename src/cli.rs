@@ -223,7 +223,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn get_arguments() {
+    fn test_get_arguments_for_variant() {
         for variant in &Cli::variants() {
             println!("Testing {:?}", variant);
             let variant = Cli::from_str(variant).unwrap();
