@@ -231,4 +231,13 @@ mod tests {
             let _args = variant.get_arguments();
         }
     }
+
+    #[test]
+    fn test_unknown_variant() -> std::result::Result<(), String> {
+        match Cli::from_str("unknown") {
+            Err(e) if e == "valid values: SCFS, SplitFS, CatFS" => Ok(()),
+            Err(e) => Err(format!("Unexpected error: {}", e)),
+            Ok(_) => Err(String::from("Did not result in Error")),
+        }
+    }
 }
