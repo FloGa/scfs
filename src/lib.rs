@@ -171,9 +171,9 @@
 //!
 //! ## Limitations
 //!
-//! I consider this project no longer a "raw prototype" and I am dog-fooding it,
-//! meaning I use it in my own backup strategies and create features based on my
-//! personal needs.
+//! I consider this project no longer a "raw prototype", and I am eating my own
+//! dog food, meaning I use it in my own backup strategies and create features
+//! based on my personal needs.
 //!
 //! However, this might not meet the needs of the typical user and without
 //! feedback I might not even think of some scenarios to begin with.
