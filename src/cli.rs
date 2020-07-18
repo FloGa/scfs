@@ -223,12 +223,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn get_arguments() {
+    fn test_get_arguments_for_variant() {
         for variant in &Cli::variants() {
             println!("Testing {:?}", variant);
             let variant = Cli::from_str(variant).unwrap();
             // This call must not panic.
             let _args = variant.get_arguments();
+        }
+    }
+
+    #[test]
+    fn test_unknown_variant() -> std::result::Result<(), String> {
+        match Cli::from_str("unknown") {
+            Err(e) if e == "valid values: SCFS, SplitFS, CatFS" => Ok(()),
+            Err(e) => Err(format!("Unexpected error: {}", e)),
+            Ok(_) => Err(String::from("Did not result in Error")),
         }
     }
 }
