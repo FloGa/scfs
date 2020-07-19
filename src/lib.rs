@@ -95,6 +95,15 @@
 //! splitfs --blocksize=$((1024 * 1024)) <base directory> <mount point>
 //! ```
 //!
+//! New since v0.9.0: The block size may now also be given with a symbolic
+//! quantifier. Allowed quantifiers are "K", "M", "G", and "T", each one
+//! multiplying the base with 1024. So, to set the block size to 1&nbsp;MB like in
+//! the example above, you can now use:
+//!
+//! ```shell script
+//! splitfs --blocksize=1M <base directory> <mount point>
+//! ```
+//!
 //! You can actually go as far as to set a block size of one byte, but be prepared
 //! for a ridiculous amount of overhead or maybe even a system freeze because the
 //! metadata table grows too large.

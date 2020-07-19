@@ -1,11 +1,12 @@
 use std::ffi::OsStr;
 use std::fs;
+use std::iter::FromIterator;
 use std::path::Path;
 use std::sync::mpsc::channel;
 
 use clap::{
-    arg_enum, crate_authors, crate_description, crate_name, crate_version, value_t, App, Arg,
-    ArgMatches, Result,
+    arg_enum, crate_authors, crate_description, crate_name, crate_version, App, Arg, ArgMatches,
+    Result,
 };
 use daemonize::Daemonize;
 
@@ -44,7 +45,7 @@ impl Cli {
         let mode = arguments.value_of(ARG_MODE);
         let mirror = arguments.value_of_os(ARG_MIRROR).unwrap();
         let mountpoint = arguments.value_of_os(ARG_MOUNTPOINT).unwrap();
-        let blocksize = value_t!(arguments, ARG_BLOCKSIZE, u64);
+        let blocksize = arguments.value_of(ARG_BLOCKSIZE);
         let daemonize = arguments.is_present(ARG_DAEMON);
         let mkdir = arguments.is_present(ARG_MKDIR);
 
@@ -111,7 +112,8 @@ impl Cli {
             }
 
             (Cli::SplitFS, _) | (Cli::SCFS, Some("split")) => {
-                let blocksize = blocksize.unwrap_or_else(|e| e.exit());
+                let blocksize = blocksize.unwrap();
+                let blocksize = convert_symbolic_quantity(blocksize).unwrap();
                 let config = Config::default().blocksize(blocksize);
                 let fs = SplitFS::new(&mirror, config, drop_hook);
                 if daemonize {
@@ -216,6 +218,39 @@ fn args_splitfs<'a, 'b>() -> Vec<Arg<'a, 'b>> {
     args
 }
 
+fn convert_symbolic_quantity<S: Into<String>>(s: S) -> std::result::Result<u64, &'static str> {
+    let s = s.into();
+    let s = s.trim();
+    let digits = String::from_iter(s.chars().take_while(|c| c.is_ascii_digit()).fuse());
+
+    if digits.len() == 0 {
+        return Err("No digits given");
+    }
+
+    let base = digits.parse::<u64>().unwrap();
+
+    if base < 1 {
+        return Err("Base may not be zero or negative");
+    }
+
+    let quantifier = s[digits.len()..].trim();
+
+    if quantifier.len() > 1 || !"KMGT".contains(&quantifier) {
+        return Err("Unkown quantifier");
+    }
+
+    let exp = match quantifier {
+        "" => 0,
+        "K" => 1,
+        "M" => 2,
+        "G" => 3,
+        "T" => 4,
+        _ => unreachable!(),
+    };
+
+    Ok(digits.parse::<u64>().unwrap() * 1024_u64.pow(exp))
+}
+
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
@@ -239,5 +274,47 @@ mod tests {
             Err(e) => Err(format!("Unexpected error: {}", e)),
             Ok(_) => Err(String::from("Did not result in Error")),
         }
+    }
+
+    #[test]
+    fn test_symbolic_quantity_converter() {
+        let sym_exp = vec![("", 0), ("K", 1), ("M", 2), ("G", 3), ("T", 4)];
+        for (sym, exp) in sym_exp {
+            println!("Testing 1{}", sym);
+            assert_eq!(
+                convert_symbolic_quantity(format!("1{}", sym)).unwrap(),
+                1024_u64.pow(exp)
+            );
+        }
+    }
+
+    #[test]
+    fn test_symbolic_quantity_converter_with_space() {
+        assert_eq!(convert_symbolic_quantity(" 1024 ").unwrap(), 1024);
+    }
+
+    #[test]
+    fn test_symbolic_quantity_converter_with_space_and_quantifier() {
+        assert_eq!(convert_symbolic_quantity(" 1 K ").unwrap(), 1024);
+    }
+
+    #[test]
+    fn test_symbolic_quantity_converter_fail_on_invalid_input() {
+        assert!(convert_symbolic_quantity("1K1").is_err());
+    }
+
+    #[test]
+    fn test_symbolic_quantity_converter_fail_on_empty_base() {
+        assert!(convert_symbolic_quantity("K").is_err());
+    }
+
+    #[test]
+    fn test_symbolic_quantity_converter_fail_on_zero() {
+        assert!(convert_symbolic_quantity("0").is_err());
+    }
+
+    #[test]
+    fn test_symbolic_quantity_converter_fail_on_negative() {
+        assert!(convert_symbolic_quantity("-1").is_err());
     }
 }
