@@ -275,4 +275,46 @@ mod tests {
             Ok(_) => Err(String::from("Did not result in Error")),
         }
     }
+
+    #[test]
+    fn test_symbolic_quantity_converter() {
+        let sym_exp = vec![("", 0), ("K", 1), ("M", 2), ("G", 3), ("T", 4)];
+        for (sym, exp) in sym_exp {
+            println!("Testing 1{}", sym);
+            assert_eq!(
+                convert_symbolic_quantity(format!("1{}", sym)).unwrap(),
+                1024_u64.pow(exp)
+            );
+        }
+    }
+
+    #[test]
+    fn test_symbolic_quantity_converter_with_space() {
+        assert_eq!(convert_symbolic_quantity(" 1024 ").unwrap(), 1024);
+    }
+
+    #[test]
+    fn test_symbolic_quantity_converter_with_space_and_quantifier() {
+        assert_eq!(convert_symbolic_quantity(" 1 K ").unwrap(), 1024);
+    }
+
+    #[test]
+    fn test_symbolic_quantity_converter_fail_on_invalid_input() {
+        assert!(convert_symbolic_quantity("1K1").is_err());
+    }
+
+    #[test]
+    fn test_symbolic_quantity_converter_fail_on_empty_base() {
+        assert!(convert_symbolic_quantity("K").is_err());
+    }
+
+    #[test]
+    fn test_symbolic_quantity_converter_fail_on_zero() {
+        assert!(convert_symbolic_quantity("0").is_err());
+    }
+
+    #[test]
+    fn test_symbolic_quantity_converter_fail_on_negative() {
+        assert!(convert_symbolic_quantity("-1").is_err());
+    }
 }
