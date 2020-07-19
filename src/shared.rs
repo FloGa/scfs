@@ -7,7 +7,7 @@ use rusqlite::{params, Connection, Error};
 
 use crate::{FileInfo, FileInfoRow, STMT_QUERY_BY_INO, STMT_QUERY_BY_PARENT_INO_AND_FILENAME, TTL};
 
-pub trait Shared {
+pub(crate) trait Shared {
     fn file_db(&self) -> &Connection;
 
     fn get_file_info_from_ino(&self, ino: u64) -> Result<FileInfo, Error> {
@@ -84,7 +84,7 @@ pub trait Shared {
 }
 
 #[cfg(test)]
-pub mod tests {
+pub(crate) mod tests {
     use std::collections::hash_map::RandomState;
     use std::collections::HashMap;
     use std::fs;
@@ -93,7 +93,7 @@ pub mod tests {
     use std::os::unix::fs::symlink;
     use std::path::Path;
 
-    pub fn create_files_and_symlinks(
+    pub(crate) fn create_files_and_symlinks(
         path: &Path,
         files: &Vec<(String, Vec<u8>)>,
         symlinks: &Vec<(String, String)>,
@@ -112,7 +112,7 @@ pub mod tests {
         Ok(())
     }
 
-    pub fn check_symlinks(
+    pub(crate) fn check_symlinks(
         symlink_map: &mut HashMap<String, String, RandomState>,
         symlinks_found: &Vec<&DirEntry>,
     ) -> Result<(), std::io::Error> {

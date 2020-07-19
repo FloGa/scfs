@@ -1,4 +1,4 @@
-use scfs::cli::Cli;
+use scfs::Cli;
 
 fn main() {
     Cli::SCFS.run();

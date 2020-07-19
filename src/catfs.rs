@@ -18,7 +18,7 @@ use crate::{
     STMT_CREATE_INDEX_PARENT_INO_FILE_NAME, STMT_INSERT, STMT_QUERY_BY_PARENT_INO,
 };
 
-pub struct CatFS {
+pub(crate) struct CatFS {
     file_db: Connection,
     file_handles: HashMap<u64, Vec<FileHandle>>,
     config: Config,
@@ -58,7 +58,7 @@ impl Shared for CatFS {
 }
 
 impl CatFS {
-    pub fn new(mirror: &OsStr, drop_hook: DropHookFn) -> Self {
+    pub(crate) fn new(mirror: &OsStr, drop_hook: DropHookFn) -> Self {
         let config = serde_json::from_str(
             &fs::read_to_string(Path::new(&mirror).join(CONFIG_FILE_NAME))
                 .expect("SCFS config file not found"),

@@ -18,7 +18,7 @@ use crate::{
     STMT_CREATE_INDEX_PARENT_INO_FILE_NAME, STMT_INSERT, STMT_QUERY_BY_PARENT_INO, TTL,
 };
 
-pub struct SplitFS {
+pub(crate) struct SplitFS {
     file_db: Connection,
     file_handles: HashMap<u64, FileHandle>,
     config: Config,
@@ -67,7 +67,7 @@ impl Shared for SplitFS {
 }
 
 impl SplitFS {
-    pub fn new(mirror: &OsStr, config: Config, drop_hook: DropHookFn) -> Self {
+    pub(crate) fn new(mirror: &OsStr, config: Config, drop_hook: DropHookFn) -> Self {
         let file_db = Connection::open_in_memory().unwrap();
 
         file_db.execute(STMT_CREATE, NO_PARAMS).unwrap();

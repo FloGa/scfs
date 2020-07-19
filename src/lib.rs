@@ -209,15 +209,16 @@ use rusqlite::Row;
 use serde::{Deserialize, Serialize};
 use time::Timespec;
 
-pub use catfs::CatFS;
-pub use shared::Shared;
-pub use splitfs::SplitFS;
+pub use cli::Cli;
+
+pub(crate) use catfs::CatFS;
+pub(crate) use shared::Shared;
+pub(crate) use splitfs::SplitFS;
 
 mod catfs;
+mod cli;
 mod shared;
 mod splitfs;
-
-pub mod cli;
 
 const TTL: Timespec = Timespec {
     sec: 60 * 60 * 24,
@@ -263,7 +264,7 @@ const STMT_QUERY_BY_PARENT_INO_AND_FILENAME: &str = "
 
 const CONFIG_FILE_NAME: &str = ".scfs_config";
 
-pub const CONFIG_DEFAULT_BLOCKSIZE: u64 = 2 * 1024 * 1024;
+const CONFIG_DEFAULT_BLOCKSIZE: u64 = 2 * 1024 * 1024;
 
 const INO_OUTSIDE: u64 = 0;
 const INO_ROOT: u64 = 1;
@@ -302,11 +303,7 @@ fn convert_metadata_to_attr(meta: Metadata, ino: Option<u64>) -> FileAttr {
     }
 }
 
-pub fn mount<'a, 'b, FS, P, I>(
-    filesystem: FS,
-    mountpoint: &P,
-    fuse_options: I,
-) -> BackgroundSession<'a>
+fn mount<'a, 'b, FS, P, I>(filesystem: FS, mountpoint: &P, fuse_options: I) -> BackgroundSession<'a>
 where
     FS: Filesystem + Send + 'a,
     P: AsRef<Path>,
@@ -328,7 +325,7 @@ struct FileHandle {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct FileInfo {
+struct FileInfo {
     ino: u64,
     parent_ino: u64,
     path: OsString,
@@ -433,12 +430,12 @@ impl From<FileInfo> for FileInfoRow {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
-pub struct Config {
+struct Config {
     blocksize: u64,
 }
 
 impl Config {
-    pub fn blocksize(mut self, blocksize: u64) -> Self {
+    fn blocksize(mut self, blocksize: u64) -> Self {
         self.blocksize = blocksize;
         self
     }
