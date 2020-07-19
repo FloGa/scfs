@@ -5,8 +5,8 @@ use std::path::Path;
 use std::sync::mpsc::channel;
 
 use clap::{
-    arg_enum, crate_authors, crate_description, crate_name, crate_version, value_t, App, Arg,
-    ArgMatches, Result,
+    arg_enum, crate_authors, crate_description, crate_name, crate_version, App, Arg, ArgMatches,
+    Result,
 };
 use daemonize::Daemonize;
 
@@ -45,7 +45,7 @@ impl Cli {
         let mode = arguments.value_of(ARG_MODE);
         let mirror = arguments.value_of_os(ARG_MIRROR).unwrap();
         let mountpoint = arguments.value_of_os(ARG_MOUNTPOINT).unwrap();
-        let blocksize = value_t!(arguments, ARG_BLOCKSIZE, u64);
+        let blocksize = arguments.value_of(ARG_BLOCKSIZE);
         let daemonize = arguments.is_present(ARG_DAEMON);
         let mkdir = arguments.is_present(ARG_MKDIR);
 
@@ -112,7 +112,8 @@ impl Cli {
             }
 
             (Cli::SplitFS, _) | (Cli::SCFS, Some("split")) => {
-                let blocksize = blocksize.unwrap_or_else(|e| e.exit());
+                let blocksize = blocksize.unwrap();
+                let blocksize = convert_symbolic_quantity(blocksize).unwrap();
                 let config = Config::default().blocksize(blocksize);
                 let fs = SplitFS::new(&mirror, config, drop_hook);
                 if daemonize {
