@@ -10,7 +10,7 @@ use clap::{
 };
 use daemonize::Daemonize;
 
-use crate::{mount, CatFS, Config, SplitFS};
+use crate::{mount, CatFS, Config, SplitFS, CONFIG_DEFAULT_BLOCKSIZE};
 
 const ARG_MODE: &str = "mode";
 const ARG_MIRROR: &str = "mirror";
@@ -204,12 +204,15 @@ fn args_catfs<'a, 'b>() -> Vec<Arg<'a, 'b>> {
 }
 
 fn args_splitfs_only<'a, 'b>() -> Vec<Arg<'a, 'b>> {
+    let default_blocksize = Box::new(CONFIG_DEFAULT_BLOCKSIZE.to_string());
+    let default_blocksize: &'a String = Box::leak(default_blocksize);
+
     vec![Arg::with_name(ARG_BLOCKSIZE)
         .short(&ARG_BLOCKSIZE[0..1])
         .long(ARG_BLOCKSIZE)
         .help("Sets the desired blocksize")
         .takes_value(true)
-        .default_value("2097152")]
+        .default_value(&default_blocksize)]
 }
 
 fn args_splitfs<'a, 'b>() -> Vec<Arg<'a, 'b>> {
