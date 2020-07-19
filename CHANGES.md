@@ -1,3 +1,54 @@
+# Changes in 0.9.0
+
+-   Check mirror and mountpoint for sanity
+
+    -   Mirror and mountpoint have to exist.
+
+    -   Mirror must not be in a subfolder of mountpoint, to avoid recursive
+       mounts. This is also in accordance to EncFS.
+
+-   Run scfs by default to easen rapid development
+
+    Since we build more than just one binary, `cargo run` does not know
+    which one to call by default. For this case, there is the key
+    "default-run", which tells `cargo run` which binary to use when no
+    `--bin` flag is present.
+
+-   Notify main loop when filesystem is dropped
+
+    The filesystem implements the Drop trait now, which makes it possible to
+    run a function when the filesystem is unmouted in a way other than by
+    terminating the main loop (most prominently by using `umount` directly).
+
+    The previous situation was, when the filesystem was unmounted via
+    `umount`, then the main loop would hang infinitely, because there was no
+    way to notify the main loop. Now we send a quit signal when the
+    filesystem is dropped, so the main loop can exit normally.
+
+-   Canonicalize paths
+
+    Using absolute paths is necessary for a daemon, since a daemon usually
+    changes its working directory to "/" so as to not lock a directory.
+
+-   Add daemon flag which puts program in background
+
+    The daemonizing is done after the filesystem has been created, to let
+    the initialization happen in foreground. This minimizes the time the
+    daemon is running but the filesystem is not mounted yet.
+
+-   Add flag to create mountpoint directory
+
+    The mirror will intentionally *not* be created, since the mount is
+    readonly and a missing mirror directory is most likely a typo from the
+    user.
+
+-   Add converter for symbolic quantities
+
+    This converter will be used to calculate the blocksize for a SplitFS
+    mount. The size can now be given as an integer or optionally with a
+    quantifier like "K", "M", "G", and "T", each one multiplying the base
+    with 1024.
+
 # Changes in 0.8.0
 
 -   Implement readlink

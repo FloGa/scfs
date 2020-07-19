@@ -10,23 +10,55 @@ use fuse::{
     ReplyOpen, Request,
 };
 use libc::ENOENT;
-use rusqlite::{params, Connection, Error, NO_PARAMS};
+use rusqlite::{params, Connection, NO_PARAMS};
 
 use crate::{
-    convert_filetype, convert_metadata_to_attr, Config, FileHandle, FileInfo, FileInfoRow,
-    CONFIG_FILE_NAME, INO_OUTSIDE, INO_ROOT, STMT_CREATE, STMT_CREATE_INDEX_PARENT_INO_FILE_NAME,
-    STMT_INSERT, STMT_QUERY_BY_INO, STMT_QUERY_BY_PARENT_INO,
-    STMT_QUERY_BY_PARENT_INO_AND_FILENAME, TTL,
+    convert_filetype, convert_metadata_to_attr, Config, DropHookFn, FileHandle, FileInfo,
+    FileInfoRow, Shared, CONFIG_FILE_NAME, INO_OUTSIDE, INO_ROOT, STMT_CREATE,
+    STMT_CREATE_INDEX_PARENT_INO_FILE_NAME, STMT_INSERT, STMT_QUERY_BY_PARENT_INO,
 };
 
-pub struct CatFS {
+pub(crate) struct CatFS {
     file_db: Connection,
     file_handles: HashMap<u64, Vec<FileHandle>>,
     config: Config,
+    drop_hook: DropHookFn,
+}
+
+impl Shared for CatFS {
+    fn file_db(&self) -> &Connection {
+        &self.file_db
+    }
+
+    fn get_attr_from_file_info(&self, file_info: &FileInfo) -> FileAttr {
+        if file_info.vdir {
+            let parts = self.get_files_info_from_parent_ino(file_info.ino);
+            let attrs = parts
+                .iter()
+                .map(|info| {
+                    convert_metadata_to_attr(
+                        fs::symlink_metadata(&info.path).unwrap(),
+                        Some(info.ino),
+                    )
+                })
+                .collect::<Vec<_>>();
+            let mut attr = attrs.get(0).unwrap().clone();
+            attr.ino = file_info.ino;
+            attr.blocks = attrs.iter().map(|attr| attr.blocks).sum();
+            attr.size = attrs.iter().map(|attr| attr.size).sum();
+            attr
+        } else {
+            let attr = convert_metadata_to_attr(
+                fs::symlink_metadata(&file_info.path).unwrap(),
+                Some(file_info.ino),
+            );
+            attr
+        }
+    }
 }
 
 impl CatFS {
-    pub fn new(mirror: &OsStr) -> Self {
+    pub(crate) fn new(mirror: &OsStr, drop_hook: DropHookFn) -> Self {
         let config = serde_json::from_str(
             &fs::read_to_string(Path::new(&mirror).join(CONFIG_FILE_NAME))
                 .expect("SCFS config file not found"),
@@ -58,19 +90,8 @@ impl CatFS {
             file_db,
             file_handles,
             config,
+            drop_hook,
         }
-    }
-
-    fn get_file_info_from_ino(&self, ino: u64) -> Result<FileInfo, Error> {
-        let ino = FileInfoRow::from(FileInfo::with_ino(ino)).ino;
-
-        let mut stmt = self.file_db.prepare_cached(STMT_QUERY_BY_INO).unwrap();
-
-        let file_info = stmt
-            .query_map(params![ino], |row| Ok(FileInfo::from(row)))?
-            .next()
-            .unwrap();
-        file_info
     }
 
     fn get_files_info_from_parent_ino(&self, parent_ino: u64) -> Vec<FileInfo> {
@@ -85,62 +106,6 @@ impl CatFS {
             .unwrap()
             .map(|res| res.unwrap())
             .collect()
-    }
-
-    fn get_file_info_from_parent_ino_and_file_name(
-        &self,
-        parent_ino: u64,
-        file_name: OsString,
-    ) -> Result<FileInfo, Error> {
-        let parent_ino = FileInfoRow::from(FileInfo::with_parent_ino(parent_ino)).parent_ino;
-
-        let mut stmt = self
-            .file_db
-            .prepare_cached(STMT_QUERY_BY_PARENT_INO_AND_FILENAME)
-            .unwrap();
-
-        let file_name = FileInfo::default()
-            .file_name(file_name)
-            .into_file_info_row()
-            .file_name;
-
-        let file_info = stmt
-            .query_map(params![parent_ino, file_name], |row| {
-                Ok(FileInfo::from(row))
-            })
-            .unwrap()
-            .next();
-
-        match file_info {
-            Some(f) => Ok(f.unwrap()),
-            None => Err(Error::QueryReturnedNoRows),
-        }
-    }
-
-    fn get_attr_from_file_info(&self, file_info: &FileInfo) -> FileAttr {
-        if file_info.vdir {
-            let parts = self.get_files_info_from_parent_ino(file_info.ino);
-            let attrs = parts
-                .iter()
-                .map(|info| {
-                    convert_metadata_to_attr(
-                        fs::symlink_metadata(&info.path).unwrap(),
-                        Some(info.ino),
-                    )
-                })
-                .collect::<Vec<_>>();
-            let mut attr = attrs.get(0).unwrap().clone();
-            attr.ino = file_info.ino;
-            attr.blocks = attrs.iter().map(|attr| attr.blocks).sum();
-            attr.size = attrs.iter().map(|attr| attr.size).sum();
-            attr
-        } else {
-            let attr = convert_metadata_to_attr(
-                fs::symlink_metadata(&file_info.path).unwrap(),
-                Some(file_info.ino),
-            );
-            attr
-        }
     }
 
     fn populate<P: AsRef<Path>>(file_db: &Connection, path: P, parent_ino: u64) {
@@ -204,33 +169,23 @@ impl CatFS {
     }
 }
 
+impl Drop for CatFS {
+    fn drop(&mut self) {
+        &(self.drop_hook)();
+    }
+}
+
 impl Filesystem for CatFS {
     fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
-        let file_info =
-            self.get_file_info_from_parent_ino_and_file_name(parent, OsString::from(name));
-        if let Ok(file_info) = file_info {
-            let attr = self.get_attr_from_file_info(&file_info);
-            reply.entry(&TTL, &attr, 0);
-        } else {
-            reply.error(ENOENT);
-        }
+        Shared::lookup(self, _req, parent, name, reply);
     }
 
     fn getattr(&mut self, _req: &Request, ino: u64, reply: ReplyAttr) {
-        let file_info = self.get_file_info_from_ino(ino);
-        if let Ok(file_info) = file_info {
-            let attr = self.get_attr_from_file_info(&file_info);
-            reply.attr(&TTL, &attr)
-        } else {
-            reply.error(ENOENT)
-        }
+        Shared::getattr(self, _req, ino, reply);
     }
 
     fn readlink(&mut self, _req: &Request, ino: u64, reply: ReplyData) {
-        let path = self.get_file_info_from_ino(ino).unwrap().path;
-        let target = fs::read_link(path).unwrap();
-        let target = target.to_str().unwrap().as_bytes();
-        reply.data(target);
+        Shared::readlink(self, _req, ino, reply);
     }
 
     fn open(&mut self, _req: &Request, ino: u64, _flags: u32, reply: ReplyOpen) {
@@ -424,16 +379,16 @@ impl Filesystem for CatFS {
 
 #[cfg(test)]
 mod tests {
-    use std::io::Write;
+    use std::fs::DirEntry;
     use std::iter;
     use std::ops::Deref;
-    use std::os::unix::fs::symlink;
 
     use fuse::BackgroundSession;
     use rand::{thread_rng, Rng, RngCore};
     use tempfile::{tempdir, TempDir};
 
     use crate::mount;
+    use crate::shared::tests::{check_symlinks, create_files_and_symlinks};
 
     use super::*;
 
@@ -453,18 +408,9 @@ mod tests {
         let mirror = tempdir()?;
         let mountpoint = tempdir()?;
 
-        for (file_name, data) in files {
-            let path = mirror.path().join(file_name);
-            fs::create_dir_all(path.parent().unwrap())?;
-            let mut file = File::create(&path)?;
-            file.write_all(&data)?;
-        }
+        create_files_and_symlinks(mirror.path(), &files, &symlinks)?;
 
-        for (link_name, target) in symlinks {
-            symlink(&target, mirror.path().join(&link_name))?;
-        }
-
-        let fs = CatFS::new(mirror.path().as_os_str());
+        let fs = CatFS::new(mirror.path().as_os_str(), Box::new(|| ()));
 
         let session = mount(fs, &mountpoint, Vec::new());
 
@@ -566,14 +512,7 @@ mod tests {
     fn test_empty_mirror() {
         // Since a valid SplitFS needs a config file, panic if there is no such file
 
-        let session = mount_and_create_files(&Vec::new()).unwrap();
-
-        let entries = fs::read_dir(&session.mountpoint)
-            .unwrap()
-            .map(|entry| entry.unwrap())
-            .collect::<Vec<_>>();
-
-        assert_eq!(entries.len(), 0);
+        mount_and_create_files(&Vec::new()).unwrap();
     }
 
     #[test]
@@ -601,14 +540,7 @@ mod tests {
 
         let files = vec![(CONFIG_FILE_NAME.to_string(), "{}".into())];
 
-        let session = mount_and_create_files(&files).unwrap();
-
-        let entries = fs::read_dir(&session.mountpoint)
-            .unwrap()
-            .map(|entry| entry.unwrap())
-            .collect::<Vec<_>>();
-
-        assert_eq!(entries.len(), 0);
+        mount_and_create_files(&files).unwrap();
     }
 
     #[test]
@@ -679,7 +611,7 @@ mod tests {
             config,
         );
 
-        let mut symlink_map = HashMap::new();
+        let mut symlink_map: HashMap<String, String> = HashMap::new();
         symlink_map.insert(
             "link_rel".into(),
             files.first().unwrap().0.split("/").next().unwrap().into(),
@@ -696,12 +628,10 @@ mod tests {
 
         assert_eq!(entries.len(), num_files + symlink_map.len());
 
-        let symlinks_found = entries
+        let symlinks_found: Vec<&DirEntry> = entries
             .iter()
             .filter(|item| item.file_type().unwrap().is_symlink())
             .collect::<Vec<_>>();
-
-        assert_eq!(symlinks_found.len(), symlink_map.len());
 
         let contents = entries
             .iter()
@@ -712,18 +642,7 @@ mod tests {
             .iter()
             .all(|content| content.eq(contents.first().unwrap())));
 
-        for symlink in symlinks_found {
-            let symlink = symlink.path();
-            let link_name = symlink.file_name().unwrap().to_str().unwrap();
-            let target = symlink_map.remove(link_name);
-            assert_ne!(target, None);
-            let target = target.unwrap();
-            assert_eq!(fs::read_link(symlink)?.to_str().unwrap(), target);
-        }
-
-        assert!(symlink_map.is_empty());
-
-        Ok(())
+        check_symlinks(&mut symlink_map, &symlinks_found)
     }
 
     #[test]
@@ -749,22 +668,9 @@ mod tests {
             .filter(|item| item.file_type().unwrap().is_symlink())
             .collect::<Vec<_>>();
 
-        assert_eq!(symlinks_found.len(), symlink_map.len());
-
         assert!(symlinks_found.first().unwrap().path().is_dir());
 
-        for symlink in symlinks_found {
-            let symlink = symlink.path();
-            let link_name = symlink.file_name().unwrap().to_str().unwrap();
-            let target = symlink_map.remove(link_name);
-            assert_ne!(target, None);
-            let target = target.unwrap();
-            assert_eq!(fs::read_link(symlink)?.to_str().unwrap(), target);
-        }
-
-        assert!(symlink_map.is_empty());
-
-        Ok(())
+        check_symlinks(&mut symlink_map, &symlinks_found)
     }
 
     #[test]
@@ -792,19 +698,6 @@ mod tests {
             .filter(|item| item.file_type().unwrap().is_symlink())
             .collect::<Vec<_>>();
 
-        assert_eq!(symlinks_found.len(), symlink_map.len());
-
-        for symlink in symlinks_found {
-            let symlink = symlink.path();
-            let link_name = symlink.file_name().unwrap().to_str().unwrap();
-            let target = symlink_map.remove(link_name);
-            assert_ne!(target, None);
-            let target = target.unwrap();
-            assert_eq!(fs::read_link(symlink)?.to_str().unwrap(), target);
-        }
-
-        assert!(symlink_map.is_empty());
-
-        Ok(())
+        check_symlinks(&mut symlink_map, &symlinks_found)
     }
 }

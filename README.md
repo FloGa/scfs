@@ -44,9 +44,6 @@ manually splitting files. That's why I had also *CatFS* in mind, when
 developing SCFS. CatFS will concatenate chunked files transparently and
 present them as complete files again.
 
-CatFS is included in SCFS since version 0.4.0.
-
-
 ### Why Rust?
 
 I am relatively new to Rust and I thought, the best way to deepen my
@@ -57,7 +54,7 @@ and a certain knowledge of the language.
 
 SCFS can be installed easily through Cargo via `crates.io`:
 
-``` text
+```shell script
 cargo install scfs
 ```
 
@@ -67,14 +64,13 @@ cargo install scfs
 
 To mount a directory with SplitFS, use the following form:
 
-``` text
+```shell script
 scfs --mode=split <base directory> <mount point>
 ```
 
-Since version 0.8.0 this can be simplified by using the dedicated `splitfs`
-binary:
+This can be simplified by using the dedicated `splitfs` binary:
 
-``` text
+```shell script
 splitfs <base directory> <mount point>
 ```
 
@@ -82,11 +78,11 @@ The directory specified as `mount point` will now reflect the content of `base
 directory`, replacing each regular file with a directory that contains
 enumerated chunks of that file as separate files.
 
-Since version 0.7.0, it is possible to use a custom block size for the file
-fragments. For example, to use 1&nbsp;MB chunks instead of the default size of
-2&nbsp;MB, you would go with:
+It is possible to use a custom block size for the file fragments. For example,
+to use 1&nbsp;MB chunks instead of the default size of 2&nbsp;MB, you would go
+with:
 
-``` text
+```shell script
 splitfs --blocksize=1048576 <base directory> <mount point>
 ```
 
@@ -95,8 +91,17 @@ Where 1048576 is 1024 * 1024, so one megabyte in bytes.
 You can even leverage the calculating power of your Shell, like for example in
 Bash:
 
-``` text
+```shell script
 splitfs --blocksize=$((1024 * 1024)) <base directory> <mount point>
+```
+
+New since v0.9.0: The block size may now also be given with a symbolic
+quantifier. Allowed quantifiers are "K", "M", "G", and "T", each one
+multiplying the base with 1024. So, to set the block size to 1&nbsp;MB like in
+the example above, you can now use:
+
+```shell script
+splitfs --blocksize=1M <base directory> <mount point>
 ```
 
 You can actually go as far as to set a block size of one byte, but be prepared
@@ -107,14 +112,13 @@ metadata table grows too large.
 
 To mount a directory with CatFS, use the following form:
 
-``` text
+```shell script
 scfs --mode=cat <base directory> <mount point>
 ```
 
-Since version 0.8.0 this can be simplified by using the dedicated `catfs`
-binary:
+This can be simplified by using the dedicated `catfs` binary:
 
-``` text
+```shell script
 catfs <base directory> <mount point>
 ```
 
@@ -126,8 +130,8 @@ directory`, replacing each directory with chunked files in it as single files.
 
 ### Additional FUSE mount options
 
-Since v0.8.0 it is possible to pass additional mount options to the underlying
-FUSE library.
+It is possible to pass additional mount options to the underlying FUSE
+library.
 
 SCFS supports two ways of specifying options, either via the "-o" option, or
 via additional arguments after a "--" separator. This is in accordance to
@@ -135,18 +139,45 @@ other FUSE based filesystems like EncFS.
     
 These two calls are equivalent:
     
-``` text
+```shell script
 scfs --mode=split -o nonempty mirror mountpoint
 scfs --mode=split mirror mountpoint -- nonempty
 ```
 
 Of course, these methods also work in the `splitfs` and `catfs` binaries.
 
+### Daemon mode
+
+Originally, SCFS was meant to be run in the foreground. This proved to be
+annoying if one wants to use the same terminal for further work. Granted, one
+could always use features of their Shell to send the process to the
+background, but then you have a background process that might accidentally be
+killed if the user closes terminal. Furthermore, SCFS originally did not
+terminate cleanly if the user unmounted it by external means.
+
+Since v0.9.0, SCFS natively supports daemon mode, in that the program changes
+its working directory to `"/"` and then forks itself into a true daemon
+process, independent of the running terminal.
+
+```shell script
+splitfs --daemon mirror mountpoint
+```
+
+Note that `mirror` and `mountpoint` are resolved *before* changing the working
+directory, so they can still be given relative to the current working
+directory.
+
+To unmount, `fusermount` can be used:
+
+```shell script
+fusermount -u mountpoint
+```
+
 ## Limitations
 
-I consider this project no longer a "raw prototype" and I am dog-fooding it,
-meaning I use it in my own backup strategies and create features based on my
-personal needs.
+I consider this project no longer a "raw prototype", and I am eating my own
+dog food, meaning I use it in my own backup strategies and create features
+based on my personal needs.
 
 However, this might not meet the needs of the typical user and without
 feedback I might not even think of some scenarios to begin with.
@@ -156,12 +187,11 @@ Specifically, these are the current limitations of SCFS:
 -   It should work an all UNIX based systems, like Linux and maybe some MacOS
     versions, however without MacOS specific file attributes. But definitely
     not on Windows, since this would need special handling of system calls,
-    which I haven't had time to care of yet.
+    which I haven't had time to take care of yet.
 
--   It can only work with directories, regular files, and symlinks (since
-    v0.8.0). Every other file types (device files, pipes, and so on) will be
-    silently ignored. Since v0.8.0: Not supported file types will no longer
-    result in a panic.
+-   It can only work with directories, regular files, and symlinks. Every
+    other file types (device files, pipes, and so on) will be silently
+    ignored.
 
 -   The base directory will be mounted read-only in the new mount point, and
     SCFS expects that the base directory will not be altered while mounted.
