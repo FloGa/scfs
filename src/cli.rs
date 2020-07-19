@@ -1,5 +1,6 @@
 use std::ffi::OsStr;
 use std::fs;
+use std::iter::FromIterator;
 use std::path::Path;
 use std::sync::mpsc::channel;
 
@@ -214,6 +215,39 @@ fn args_splitfs<'a, 'b>() -> Vec<Arg<'a, 'b>> {
     let mut args = args_base();
     args.append(args_splitfs_only().as_mut());
     args
+}
+
+fn convert_symbolic_quantity<S: Into<String>>(s: S) -> std::result::Result<u64, &'static str> {
+    let s = s.into();
+    let s = s.trim();
+    let digits = String::from_iter(s.chars().take_while(|c| c.is_ascii_digit()).fuse());
+
+    if digits.len() == 0 {
+        return Err("No digits given");
+    }
+
+    let base = digits.parse::<u64>().unwrap();
+
+    if base < 1 {
+        return Err("Base may not be zero or negative");
+    }
+
+    let quantifier = s[digits.len()..].trim();
+
+    if quantifier.len() > 1 || !"KMGT".contains(&quantifier) {
+        return Err("Unkown quantifier");
+    }
+
+    let exp = match quantifier {
+        "" => 0,
+        "K" => 1,
+        "M" => 2,
+        "G" => 3,
+        "T" => 4,
+        _ => unreachable!(),
+    };
+
+    Ok(digits.parse::<u64>().unwrap() * 1024_u64.pow(exp))
 }
 
 #[cfg(test)]
