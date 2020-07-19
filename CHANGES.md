@@ -1,4 +1,4 @@
-# Changes since latest release
+# Changes in 0.9.0
 
 -   Check mirror and mountpoint for sanity
 
