@@ -171,7 +171,7 @@ impl CatFS {
 
 impl Drop for CatFS {
     fn drop(&mut self) {
-        &(self.drop_hook)();
+        let _ = &(self.drop_hook)();
     }
 }
 
@@ -301,9 +301,11 @@ impl Filesystem for CatFS {
         if let Ok(file_info) = file_info {
             if offset < 2 {
                 if offset == 0 {
-                    reply.add(file_info.ino, 1, FileType::Directory, ".");
+                    if reply.add(file_info.ino, 1, FileType::Directory, ".") {
+                        unreachable!()
+                    }
                 }
-                reply.add(
+                if reply.add(
                     if file_info.parent_ino == INO_OUTSIDE {
                         file_info.ino
                     } else {
@@ -312,7 +314,9 @@ impl Filesystem for CatFS {
                     2,
                     FileType::Directory,
                     "..",
-                );
+                ) {
+                    unreachable!()
+                }
             }
 
             let mut stmt = self

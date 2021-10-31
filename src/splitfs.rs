@@ -189,7 +189,7 @@ impl SplitFS {
 
 impl Drop for SplitFS {
     fn drop(&mut self) {
-        &(self.drop_hook)();
+        let _ = &(self.drop_hook)();
     }
 }
 
@@ -321,12 +321,14 @@ impl Filesystem for SplitFS {
             let mut additional_offset = 0;
             if offset < 3 {
                 if offset < 1 {
-                    reply.add(file_info.ino, 1, FileType::Directory, ".");
+                    if reply.add(file_info.ino, 1, FileType::Directory, ".") {
+                        unreachable!()
+                    }
                     additional_offset += 1;
                 }
 
                 if offset < 2 {
-                    reply.add(
+                    if reply.add(
                         if file_info.parent_ino == INO_OUTSIDE {
                             file_info.ino
                         } else {
@@ -335,13 +337,17 @@ impl Filesystem for SplitFS {
                         2,
                         FileType::Directory,
                         "..",
-                    );
+                    ) {
+                        unreachable!()
+                    }
                     additional_offset += 1;
                 }
 
                 if offset < 3 {
                     if file_info.ino == INO_ROOT {
-                        reply.add(INO_CONFIG, 3, FileType::RegularFile, CONFIG_FILE_NAME);
+                        if reply.add(INO_CONFIG, 3, FileType::RegularFile, CONFIG_FILE_NAME) {
+                            unreachable!()
+                        }
                         additional_offset += 1;
                     }
                 }
