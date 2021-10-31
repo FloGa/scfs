@@ -12,7 +12,7 @@ license = "WTFPL"
 
 default-run = "scfs"
 
-exclude = ["/bump"]
+exclude = ["/bump", "/sync_readme_with_doc.bash"]
 
 [dependencies]
 clap = "2.33.0"
