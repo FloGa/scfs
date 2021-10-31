@@ -203,11 +203,11 @@ use std::os::unix::ffi::OsStrExt;
 use std::os::unix::ffi::OsStringExt;
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use fuse::{BackgroundSession, FileAttr, FileType, Filesystem};
+use fuser::{BackgroundSession, FileAttr, FileType, Filesystem};
 use rusqlite::Row;
 use serde::{Deserialize, Serialize};
-use time::Timespec;
 
 pub use cli::Cli;
 
@@ -220,10 +220,7 @@ mod cli;
 mod shared;
 mod splitfs;
 
-const TTL: Timespec = Timespec {
-    sec: 60 * 60 * 24,
-    nsec: 0,
-};
+const TTL: Duration = Duration::from_secs(60 * 60 * 24);
 
 const STMT_CREATE: &str = "
     CREATE TABLE Files (
@@ -272,6 +269,14 @@ const INO_CONFIG: u64 = 2;
 
 type DropHookFn = Box<dyn Fn() + Send + 'static>;
 
+fn system_time_from_time(secs: i64, nsecs: i64) -> SystemTime {
+    if secs >= 0 {
+        UNIX_EPOCH + Duration::new(secs as u64, nsecs as u32)
+    } else {
+        UNIX_EPOCH - Duration::new((-secs) as u64, nsecs as u32)
+    }
+}
+
 fn convert_filetype(ft: fs::FileType) -> Option<FileType> {
     if ft.is_dir() {
         Some(FileType::Directory)
@@ -289,33 +294,34 @@ fn convert_metadata_to_attr(meta: Metadata, ino: Option<u64>) -> FileAttr {
         ino: if let Some(ino) = ino { ino } else { meta.ino() },
         size: meta.size(),
         blocks: meta.blocks(),
-        atime: Timespec::new(meta.atime(), meta.atime_nsec() as i32),
-        mtime: Timespec::new(meta.mtime(), meta.mtime_nsec() as i32),
-        ctime: Timespec::new(meta.ctime(), meta.ctime_nsec() as i32),
-        crtime: Timespec::new(0, 0),
+        atime: system_time_from_time(meta.atime(), meta.atime_nsec()),
+        mtime: system_time_from_time(meta.mtime(), meta.mtime_nsec()),
+        ctime: system_time_from_time(meta.ctime(), meta.ctime_nsec()),
+        crtime: meta.created().unwrap_or(system_time_from_time(0, 0)),
         kind: convert_filetype(meta.file_type()).expect("Filetype not supported"),
         perm: meta.mode() as u16,
         nlink: meta.nlink() as u32,
         uid: meta.uid(),
         gid: meta.gid(),
         rdev: meta.rdev() as u32,
+        blksize: meta.blksize() as u32,
         flags: 0,
     }
 }
 
-fn mount<'a, 'b, FS, P, I>(filesystem: FS, mountpoint: &P, fuse_options: I) -> BackgroundSession<'a>
+fn mount<'a, 'b, FS, P, I>(filesystem: FS, mountpoint: &P, fuse_options: I) -> BackgroundSession
 where
-    FS: Filesystem + Send + 'a,
+    FS: Filesystem + Send + 'static + 'a,
     P: AsRef<Path>,
     I: IntoIterator<Item = &'b OsStr>,
 {
-    let options = ["-o", "ro", "-o", "fsname=scfs"]
+    let options = ["ro", "fsname=scfs"]
         .iter()
         .map(|o| o.as_ref())
         .chain(fuse_options)
         .collect::<Vec<_>>();
 
-    unsafe { fuse::spawn_mount(filesystem, &mountpoint, &options).unwrap() }
+    fuser::spawn_mount(filesystem, &mountpoint, &options).unwrap()
 }
 
 struct FileHandle {

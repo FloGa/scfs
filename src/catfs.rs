@@ -5,7 +5,7 @@ use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
 use std::{fs, thread};
 
-use fuse::{
+use fuser::{
     FileAttr, FileType, Filesystem, ReplyAttr, ReplyData, ReplyDirectory, ReplyEmpty, ReplyEntry,
     ReplyOpen, Request,
 };
@@ -188,7 +188,7 @@ impl Filesystem for CatFS {
         Shared::readlink(self, _req, ino, reply);
     }
 
-    fn open(&mut self, _req: &Request, ino: u64, _flags: u32, reply: ReplyOpen) {
+    fn open(&mut self, _req: &Request, ino: u64, _flags: i32, reply: ReplyOpen) {
         let files = self.get_files_info_from_parent_ino(ino);
 
         let fhs = files
@@ -207,11 +207,13 @@ impl Filesystem for CatFS {
 
     fn read(
         &mut self,
-        _req: &Request,
+        _req: &Request<'_>,
         ino: u64,
         fh: u64,
         offset: i64,
         size: u32,
+        _flags: i32,
+        _lock_owner: Option<u64>,
         reply: ReplyData,
     ) {
         let offset = offset as usize;
@@ -274,11 +276,11 @@ impl Filesystem for CatFS {
 
     fn release(
         &mut self,
-        _req: &Request,
+        _req: &Request<'_>,
         _ino: u64,
         fh: u64,
-        _flags: u32,
-        _lock_owner: u64,
+        _flags: i32,
+        _lock_owner: Option<u64>,
         _flush: bool,
         reply: ReplyEmpty,
     ) {
@@ -383,7 +385,7 @@ mod tests {
     use std::iter;
     use std::ops::Deref;
 
-    use fuse::BackgroundSession;
+    use fuser::BackgroundSession;
     use rand::{thread_rng, Rng, RngCore};
     use tempfile::{tempdir, TempDir};
 
@@ -395,8 +397,8 @@ mod tests {
     // Helper struct to keep necessary variables in scope. To not make the compiler complain,
     // prefix them with an underscore. If for example the TempDir variables are not kept in scope
     // this way, the directories would be deleted before the tests can be run.
-    struct TempSession<'a> {
-        _session: BackgroundSession<'a>,
+    struct TempSession {
+        _session: BackgroundSession,
         _mirror: TempDir,
         pub(crate) mountpoint: TempDir,
     }
@@ -404,7 +406,7 @@ mod tests {
     fn mount_and_create_files_with_symlinks<'a>(
         files: &Vec<(String, Vec<u8>)>,
         symlinks: Vec<(String, String)>,
-    ) -> Result<TempSession<'a>, std::io::Error> {
+    ) -> Result<TempSession, std::io::Error> {
         let mirror = tempdir()?;
         let mountpoint = tempdir()?;
 
@@ -423,7 +425,7 @@ mod tests {
 
     fn mount_and_create_files<'a>(
         files: &Vec<(String, Vec<u8>)>,
-    ) -> Result<TempSession<'a>, std::io::Error> {
+    ) -> Result<TempSession, std::io::Error> {
         mount_and_create_files_with_symlinks(files, Vec::new())
     }
 

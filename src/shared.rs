@@ -1,7 +1,7 @@
 use std::ffi::{OsStr, OsString};
 use std::fs;
 
-use fuse::{FileAttr, ReplyAttr, ReplyData, ReplyEntry, Request};
+use fuser::{FileAttr, ReplyAttr, ReplyData, ReplyEntry, Request};
 use libc::ENOENT;
 use rusqlite::{params, Connection, Error};
 
