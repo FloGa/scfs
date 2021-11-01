@@ -442,13 +442,13 @@ mod tests {
 
         (0..num_files)
             .flat_map(|file_num| {
-                let max_num_fragments = rng.gen_range(1, max_num_fragments);
+                let max_num_fragments = rng.gen_range(1..max_num_fragments);
                 (0..max_num_fragments)
                     .map(|fragment_num| {
                         let file_name = format!("file_{}/scfs.{:010}", file_num, fragment_num);
 
                         let fragment_size = if fragment_num == max_num_fragments - 1 && rng.gen() {
-                            rng.gen_range(1, blocksize + 1)
+                            rng.gen_range(1..(blocksize + 1))
                         } else {
                             blocksize
                         };
