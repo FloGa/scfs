@@ -21,6 +21,7 @@ use crate::{
 pub(crate) struct CatFS {
     file_db: Connection,
     file_handles: HashMap<u64, Vec<FileHandle>>,
+    next_fh: u64,
     config: Config,
     drop_hook: DropHookFn,
 }
@@ -89,6 +90,7 @@ impl CatFS {
         CatFS {
             file_db,
             file_handles,
+            next_fh: 0,
             config,
             drop_hook,
         }
@@ -200,7 +202,8 @@ impl Filesystem for CatFS {
             })
             .collect();
 
-        let fh = time::precise_time_ns();
+        let fh = self.next_fh;
+        self.next_fh += 1;
         self.file_handles.insert(fh, fhs);
         reply.opened(fh, 0);
     }

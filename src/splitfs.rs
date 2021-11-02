@@ -21,6 +21,7 @@ use crate::{
 pub(crate) struct SplitFS {
     file_db: Connection,
     file_handles: HashMap<u64, FileHandle>,
+    next_fh: u64,
     config: Config,
     config_json: String,
     drop_hook: DropHookFn,
@@ -85,6 +86,7 @@ impl SplitFS {
         SplitFS {
             file_db,
             file_handles,
+            next_fh: 0,
             config,
             config_json,
             drop_hook,
@@ -233,7 +235,8 @@ impl Filesystem for SplitFS {
 
             let start = (file_info.part - 1) * self.config.blocksize;
             let end = start + self.config.blocksize;
-            let fh = time::precise_time_ns();
+            let fh = self.next_fh;
+            self.next_fh += 1;
 
             self.file_handles
                 .insert(fh, FileHandle { file, start, end });
