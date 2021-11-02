@@ -10,17 +10,19 @@ use fuser::{
     ReplyOpen, Request,
 };
 use libc::ENOENT;
-use rusqlite::{params, Connection, NO_PARAMS};
+use rusqlite::{params, Connection};
 
 use crate::{
     convert_filetype, convert_metadata_to_attr, Config, DropHookFn, FileHandle, FileInfo,
-    FileInfoRow, Shared, CONFIG_FILE_NAME, INO_CONFIG, INO_OUTSIDE, INO_ROOT, STMT_CREATE,
-    STMT_CREATE_INDEX_PARENT_INO_FILE_NAME, STMT_INSERT, STMT_QUERY_BY_PARENT_INO, TTL,
+    FileInfoRow, Shared, CONFIG_FILE_NAME, INO_CONFIG, INO_FIRST_FREE, INO_OUTSIDE, INO_ROOT,
+    STMT_CREATE, STMT_CREATE_INDEX_PARENT_INO_FILE_NAME, STMT_INSERT, STMT_QUERY_BY_PARENT_INO,
+    TTL,
 };
 
 pub(crate) struct SplitFS {
     file_db: Connection,
     file_handles: HashMap<u64, FileHandle>,
+    next_fh: u64,
     config: Config,
     config_json: String,
     drop_hook: DropHookFn,
@@ -70,12 +72,12 @@ impl SplitFS {
     pub(crate) fn new(mirror: &OsStr, config: Config, drop_hook: DropHookFn) -> Self {
         let file_db = Connection::open_in_memory().unwrap();
 
-        file_db.execute(STMT_CREATE, NO_PARAMS).unwrap();
+        file_db.execute(STMT_CREATE, []).unwrap();
 
-        SplitFS::populate(&file_db, &mirror, &config, INO_OUTSIDE);
+        SplitFS::populate(&file_db, &mirror, &config, INO_OUTSIDE, INO_FIRST_FREE);
 
         file_db
-            .execute(STMT_CREATE_INDEX_PARENT_INO_FILE_NAME, NO_PARAMS)
+            .execute(STMT_CREATE_INDEX_PARENT_INO_FILE_NAME, [])
             .unwrap();
 
         let file_handles = Default::default();
@@ -85,6 +87,7 @@ impl SplitFS {
         SplitFS {
             file_db,
             file_handles,
+            next_fh: 0,
             config,
             config_json,
             drop_hook,
@@ -101,13 +104,19 @@ impl SplitFS {
         attr
     }
 
-    fn populate<P: AsRef<Path>>(file_db: &Connection, path: P, config: &Config, parent_ino: u64) {
+    fn populate<P: AsRef<Path>>(
+        file_db: &Connection,
+        path: P,
+        config: &Config,
+        parent_ino: u64,
+        mut next_ino: u64,
+    ) -> u64 {
         let path = path.as_ref();
 
         let meta = path.symlink_metadata().unwrap();
 
         if let None = convert_filetype(meta.file_type()) {
-            return;
+            return next_ino;
         }
 
         let mut attr = convert_metadata_to_attr(meta, None);
@@ -115,7 +124,9 @@ impl SplitFS {
         attr.ino = if parent_ino == INO_OUTSIDE {
             INO_ROOT
         } else {
-            time::precise_time_ns()
+            let ino = next_ino;
+            next_ino += 1;
+            ino
         };
 
         let file_info = FileInfoRow::from(FileInfo {
@@ -150,7 +161,11 @@ impl SplitFS {
                 for i in 0..blocks {
                     let file_name = format!("scfs.{:010}", i).into();
                     let file_info = FileInfoRow::from(FileInfo {
-                        ino: attr.ino + i + 1,
+                        ino: {
+                            let ino = attr.ino + i + 1;
+                            next_ino = ino + 1;
+                            ino
+                        },
                         parent_ino: attr.ino,
                         path: OsString::from(path.join(&file_name)),
                         file_name,
@@ -178,12 +193,15 @@ impl SplitFS {
             FileType::Directory => {
                 for entry in fs::read_dir(path).unwrap() {
                     let entry = entry.unwrap();
-                    SplitFS::populate(&file_db, entry.path(), &config, attr.ino);
+                    next_ino =
+                        SplitFS::populate(&file_db, entry.path(), &config, attr.ino, next_ino);
                 }
             }
 
             _ => {}
         }
+
+        next_ino
     }
 }
 
@@ -233,7 +251,8 @@ impl Filesystem for SplitFS {
 
             let start = (file_info.part - 1) * self.config.blocksize;
             let end = start + self.config.blocksize;
-            let fh = time::precise_time_ns();
+            let fh = self.next_fh;
+            self.next_fh += 1;
 
             self.file_handles
                 .insert(fh, FileHandle { file, start, end });

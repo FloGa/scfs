@@ -267,6 +267,8 @@ const INO_OUTSIDE: u64 = 0;
 const INO_ROOT: u64 = 1;
 const INO_CONFIG: u64 = 2;
 
+const INO_FIRST_FREE: u64 = 10;
+
 type DropHookFn = Box<dyn Fn() + Send + 'static>;
 
 fn system_time_from_time(secs: i64, nsecs: i64) -> SystemTime {
