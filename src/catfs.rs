@@ -14,7 +14,7 @@ use rusqlite::{params, Connection, NO_PARAMS};
 
 use crate::{
     convert_filetype, convert_metadata_to_attr, Config, DropHookFn, FileHandle, FileInfo,
-    FileInfoRow, Shared, CONFIG_FILE_NAME, INO_OUTSIDE, INO_ROOT, STMT_CREATE,
+    FileInfoRow, Shared, CONFIG_FILE_NAME, INO_FIRST_FREE, INO_OUTSIDE, INO_ROOT, STMT_CREATE,
     STMT_CREATE_INDEX_PARENT_INO_FILE_NAME, STMT_INSERT, STMT_QUERY_BY_PARENT_INO,
 };
 
@@ -70,7 +70,7 @@ impl CatFS {
 
         file_db.execute(STMT_CREATE, NO_PARAMS).unwrap();
 
-        CatFS::populate(&file_db, &mirror, INO_OUTSIDE);
+        CatFS::populate(&file_db, &mirror, INO_OUTSIDE, INO_FIRST_FREE);
 
         file_db
             .execute(STMT_CREATE_INDEX_PARENT_INO_FILE_NAME, NO_PARAMS)
@@ -110,25 +110,32 @@ impl CatFS {
             .collect()
     }
 
-    fn populate<P: AsRef<Path>>(file_db: &Connection, path: P, parent_ino: u64) {
+    fn populate<P: AsRef<Path>>(
+        file_db: &Connection,
+        path: P,
+        parent_ino: u64,
+        mut next_ino: u64,
+    ) -> u64 {
         let path = path.as_ref();
 
         let meta = path.symlink_metadata().unwrap();
 
         if let None = convert_filetype(meta.file_type()) {
-            return;
+            return next_ino;
         }
 
         let attr = convert_metadata_to_attr(meta, None);
 
         if path.file_name().unwrap() == CONFIG_FILE_NAME {
-            return;
+            return next_ino;
         }
 
         let ino = if parent_ino == INO_OUTSIDE {
             INO_ROOT
         } else {
-            time::precise_time_ns()
+            let ino = next_ino;
+            next_ino += 1;
+            ino
         };
 
         let file_info = FileInfoRow::from(FileInfo {
@@ -165,9 +172,11 @@ impl CatFS {
         if let FileType::Directory = attr.kind {
             for entry in fs::read_dir(path).unwrap() {
                 let entry = entry.unwrap();
-                CatFS::populate(&file_db, entry.path(), ino);
+                next_ino = CatFS::populate(&file_db, entry.path(), ino, next_ino);
             }
         }
+
+        next_ino
     }
 }
 

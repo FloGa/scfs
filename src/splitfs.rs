@@ -14,8 +14,9 @@ use rusqlite::{params, Connection, NO_PARAMS};
 
 use crate::{
     convert_filetype, convert_metadata_to_attr, Config, DropHookFn, FileHandle, FileInfo,
-    FileInfoRow, Shared, CONFIG_FILE_NAME, INO_CONFIG, INO_OUTSIDE, INO_ROOT, STMT_CREATE,
-    STMT_CREATE_INDEX_PARENT_INO_FILE_NAME, STMT_INSERT, STMT_QUERY_BY_PARENT_INO, TTL,
+    FileInfoRow, Shared, CONFIG_FILE_NAME, INO_CONFIG, INO_FIRST_FREE, INO_OUTSIDE, INO_ROOT,
+    STMT_CREATE, STMT_CREATE_INDEX_PARENT_INO_FILE_NAME, STMT_INSERT, STMT_QUERY_BY_PARENT_INO,
+    TTL,
 };
 
 pub(crate) struct SplitFS {
@@ -73,7 +74,7 @@ impl SplitFS {
 
         file_db.execute(STMT_CREATE, NO_PARAMS).unwrap();
 
-        SplitFS::populate(&file_db, &mirror, &config, INO_OUTSIDE);
+        SplitFS::populate(&file_db, &mirror, &config, INO_OUTSIDE, INO_FIRST_FREE);
 
         file_db
             .execute(STMT_CREATE_INDEX_PARENT_INO_FILE_NAME, NO_PARAMS)
@@ -103,13 +104,19 @@ impl SplitFS {
         attr
     }
 
-    fn populate<P: AsRef<Path>>(file_db: &Connection, path: P, config: &Config, parent_ino: u64) {
+    fn populate<P: AsRef<Path>>(
+        file_db: &Connection,
+        path: P,
+        config: &Config,
+        parent_ino: u64,
+        mut next_ino: u64,
+    ) -> u64 {
         let path = path.as_ref();
 
         let meta = path.symlink_metadata().unwrap();
 
         if let None = convert_filetype(meta.file_type()) {
-            return;
+            return next_ino;
         }
 
         let mut attr = convert_metadata_to_attr(meta, None);
@@ -117,7 +124,9 @@ impl SplitFS {
         attr.ino = if parent_ino == INO_OUTSIDE {
             INO_ROOT
         } else {
-            time::precise_time_ns()
+            let ino = next_ino;
+            next_ino += 1;
+            ino
         };
 
         let file_info = FileInfoRow::from(FileInfo {
@@ -152,7 +161,11 @@ impl SplitFS {
                 for i in 0..blocks {
                     let file_name = format!("scfs.{:010}", i).into();
                     let file_info = FileInfoRow::from(FileInfo {
-                        ino: attr.ino + i + 1,
+                        ino: {
+                            let ino = attr.ino + i + 1;
+                            next_ino = ino + 1;
+                            ino
+                        },
                         parent_ino: attr.ino,
                         path: OsString::from(path.join(&file_name)),
                         file_name,
@@ -180,12 +193,15 @@ impl SplitFS {
             FileType::Directory => {
                 for entry in fs::read_dir(path).unwrap() {
                     let entry = entry.unwrap();
-                    SplitFS::populate(&file_db, entry.path(), &config, attr.ino);
+                    next_ino =
+                        SplitFS::populate(&file_db, entry.path(), &config, attr.ino, next_ino);
                 }
             }
 
             _ => {}
         }
+
+        next_ino
     }
 }
 
