@@ -10,7 +10,7 @@ use fuser::{
     ReplyOpen, Request,
 };
 use libc::ENOENT;
-use rusqlite::{params, Connection, NO_PARAMS};
+use rusqlite::{params, Connection};
 
 use crate::{
     convert_filetype, convert_metadata_to_attr, Config, DropHookFn, FileHandle, FileInfo,
@@ -68,12 +68,12 @@ impl CatFS {
 
         let file_db = Connection::open_in_memory().unwrap();
 
-        file_db.execute(STMT_CREATE, NO_PARAMS).unwrap();
+        file_db.execute(STMT_CREATE, []).unwrap();
 
         CatFS::populate(&file_db, &mirror, INO_OUTSIDE, INO_FIRST_FREE);
 
         file_db
-            .execute(STMT_CREATE_INDEX_PARENT_INO_FILE_NAME, NO_PARAMS)
+            .execute(STMT_CREATE_INDEX_PARENT_INO_FILE_NAME, [])
             .unwrap();
 
         {
@@ -82,7 +82,7 @@ impl CatFS {
                     SELECT parent_ino FROM Files WHERE part != 0
                 )";
             let mut stmt = file_db.prepare(query).unwrap();
-            stmt.execute(NO_PARAMS).unwrap();
+            stmt.execute([]).unwrap();
         }
 
         let file_handles = Default::default();

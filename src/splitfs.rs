@@ -10,7 +10,7 @@ use fuser::{
     ReplyOpen, Request,
 };
 use libc::ENOENT;
-use rusqlite::{params, Connection, NO_PARAMS};
+use rusqlite::{params, Connection};
 
 use crate::{
     convert_filetype, convert_metadata_to_attr, Config, DropHookFn, FileHandle, FileInfo,
@@ -72,12 +72,12 @@ impl SplitFS {
     pub(crate) fn new(mirror: &OsStr, config: Config, drop_hook: DropHookFn) -> Self {
         let file_db = Connection::open_in_memory().unwrap();
 
-        file_db.execute(STMT_CREATE, NO_PARAMS).unwrap();
+        file_db.execute(STMT_CREATE, []).unwrap();
 
         SplitFS::populate(&file_db, &mirror, &config, INO_OUTSIDE, INO_FIRST_FREE);
 
         file_db
-            .execute(STMT_CREATE_INDEX_PARENT_INO_FILE_NAME, NO_PARAMS)
+            .execute(STMT_CREATE_INDEX_PARENT_INO_FILE_NAME, [])
             .unwrap();
 
         let file_handles = Default::default();
