@@ -341,7 +341,7 @@ checksum = "f3f6f92acf49d1b98f7a81226834412ada05458b7364277387724a237f062695"
 
 [[package]]
 name = "scfs"
-version = "0.10.0-SNAPSHOT"
+version = "0.9.1"
 dependencies = [
  "clap",
  "ctrlc",
