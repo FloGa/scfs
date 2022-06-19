@@ -1,5 +1,25 @@
 # Changes in 0.9.1-RC
 
+Update dependencies to fix security issues. Furthermore:
+
+-   Replace dependency fuse with newer fuser
+
+    `fuser` (https://github.com/cberner/fuser) is a more maintained and
+    up-to-date fork of `fuse` (https://github.com/zargony/fuse-rs), which
+    ensures smoother future development.
+
+-   Use running integer as file handle
+
+    This way, we do not need to rely on the time package to give a pseudo
+    unique value.
+
+-   Use running integer as inode
+
+    This way, we do not need to rely on the time package to give a pseudo
+    unique value.
+
+-   Remove unused time dependency
+
 # Changes in 0.9.0
 
 -   Check mirror and mountpoint for sanity
