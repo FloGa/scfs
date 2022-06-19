@@ -1,4 +1,4 @@
-# Changes in 0.9.1-RC
+# Changes in 0.9.1
 
 Update dependencies to fix security issues. Furthermore:
 
