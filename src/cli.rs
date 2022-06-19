@@ -238,17 +238,13 @@ fn convert_symbolic_quantity<S: Into<String>>(s: S) -> std::result::Result<u64, 
 
     let quantifier = s[digits.len()..].trim();
 
-    if quantifier.len() > 1 || !"KMGT".contains(&quantifier) {
-        return Err("Unkown quantifier");
-    }
-
     let exp = match quantifier {
         "" => 0,
         "K" => 1,
         "M" => 2,
         "G" => 3,
         "T" => 4,
-        _ => unreachable!(),
+        _ => return Err("Unkown quantifier"),
     };
 
     Ok(digits.parse::<u64>().unwrap() * 1024_u64.pow(exp))

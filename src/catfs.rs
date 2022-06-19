@@ -5,22 +5,23 @@ use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
 use std::{fs, thread};
 
-use fuse::{
+use fuser::{
     FileAttr, FileType, Filesystem, ReplyAttr, ReplyData, ReplyDirectory, ReplyEmpty, ReplyEntry,
     ReplyOpen, Request,
 };
 use libc::ENOENT;
-use rusqlite::{params, Connection, NO_PARAMS};
+use rusqlite::{params, Connection};
 
 use crate::{
     convert_filetype, convert_metadata_to_attr, Config, DropHookFn, FileHandle, FileInfo,
-    FileInfoRow, Shared, CONFIG_FILE_NAME, INO_OUTSIDE, INO_ROOT, STMT_CREATE,
+    FileInfoRow, Shared, CONFIG_FILE_NAME, INO_FIRST_FREE, INO_OUTSIDE, INO_ROOT, STMT_CREATE,
     STMT_CREATE_INDEX_PARENT_INO_FILE_NAME, STMT_INSERT, STMT_QUERY_BY_PARENT_INO,
 };
 
 pub(crate) struct CatFS {
     file_db: Connection,
     file_handles: HashMap<u64, Vec<FileHandle>>,
+    next_fh: u64,
     config: Config,
     drop_hook: DropHookFn,
 }
@@ -67,12 +68,12 @@ impl CatFS {
 
         let file_db = Connection::open_in_memory().unwrap();
 
-        file_db.execute(STMT_CREATE, NO_PARAMS).unwrap();
+        file_db.execute(STMT_CREATE, []).unwrap();
 
-        CatFS::populate(&file_db, &mirror, INO_OUTSIDE);
+        CatFS::populate(&file_db, &mirror, INO_OUTSIDE, INO_FIRST_FREE);
 
         file_db
-            .execute(STMT_CREATE_INDEX_PARENT_INO_FILE_NAME, NO_PARAMS)
+            .execute(STMT_CREATE_INDEX_PARENT_INO_FILE_NAME, [])
             .unwrap();
 
         {
@@ -81,7 +82,7 @@ impl CatFS {
                     SELECT parent_ino FROM Files WHERE part != 0
                 )";
             let mut stmt = file_db.prepare(query).unwrap();
-            stmt.execute(NO_PARAMS).unwrap();
+            stmt.execute([]).unwrap();
         }
 
         let file_handles = Default::default();
@@ -89,6 +90,7 @@ impl CatFS {
         CatFS {
             file_db,
             file_handles,
+            next_fh: 0,
             config,
             drop_hook,
         }
@@ -108,25 +110,32 @@ impl CatFS {
             .collect()
     }
 
-    fn populate<P: AsRef<Path>>(file_db: &Connection, path: P, parent_ino: u64) {
+    fn populate<P: AsRef<Path>>(
+        file_db: &Connection,
+        path: P,
+        parent_ino: u64,
+        mut next_ino: u64,
+    ) -> u64 {
         let path = path.as_ref();
 
         let meta = path.symlink_metadata().unwrap();
 
         if let None = convert_filetype(meta.file_type()) {
-            return;
+            return next_ino;
         }
 
         let attr = convert_metadata_to_attr(meta, None);
 
         if path.file_name().unwrap() == CONFIG_FILE_NAME {
-            return;
+            return next_ino;
         }
 
         let ino = if parent_ino == INO_OUTSIDE {
             INO_ROOT
         } else {
-            time::precise_time_ns()
+            let ino = next_ino;
+            next_ino += 1;
+            ino
         };
 
         let file_info = FileInfoRow::from(FileInfo {
@@ -163,15 +172,17 @@ impl CatFS {
         if let FileType::Directory = attr.kind {
             for entry in fs::read_dir(path).unwrap() {
                 let entry = entry.unwrap();
-                CatFS::populate(&file_db, entry.path(), ino);
+                next_ino = CatFS::populate(&file_db, entry.path(), ino, next_ino);
             }
         }
+
+        next_ino
     }
 }
 
 impl Drop for CatFS {
     fn drop(&mut self) {
-        &(self.drop_hook)();
+        let _ = &(self.drop_hook)();
     }
 }
 
@@ -188,7 +199,7 @@ impl Filesystem for CatFS {
         Shared::readlink(self, _req, ino, reply);
     }
 
-    fn open(&mut self, _req: &Request, ino: u64, _flags: u32, reply: ReplyOpen) {
+    fn open(&mut self, _req: &Request, ino: u64, _flags: i32, reply: ReplyOpen) {
         let files = self.get_files_info_from_parent_ino(ino);
 
         let fhs = files
@@ -200,18 +211,21 @@ impl Filesystem for CatFS {
             })
             .collect();
 
-        let fh = time::precise_time_ns();
+        let fh = self.next_fh;
+        self.next_fh += 1;
         self.file_handles.insert(fh, fhs);
         reply.opened(fh, 0);
     }
 
     fn read(
         &mut self,
-        _req: &Request,
+        _req: &Request<'_>,
         ino: u64,
         fh: u64,
         offset: i64,
         size: u32,
+        _flags: i32,
+        _lock_owner: Option<u64>,
         reply: ReplyData,
     ) {
         let offset = offset as usize;
@@ -274,11 +288,11 @@ impl Filesystem for CatFS {
 
     fn release(
         &mut self,
-        _req: &Request,
+        _req: &Request<'_>,
         _ino: u64,
         fh: u64,
-        _flags: u32,
-        _lock_owner: u64,
+        _flags: i32,
+        _lock_owner: Option<u64>,
         _flush: bool,
         reply: ReplyEmpty,
     ) {
@@ -299,9 +313,11 @@ impl Filesystem for CatFS {
         if let Ok(file_info) = file_info {
             if offset < 2 {
                 if offset == 0 {
-                    reply.add(file_info.ino, 1, FileType::Directory, ".");
+                    if reply.add(file_info.ino, 1, FileType::Directory, ".") {
+                        unreachable!()
+                    }
                 }
-                reply.add(
+                if reply.add(
                     if file_info.parent_ino == INO_OUTSIDE {
                         file_info.ino
                     } else {
@@ -310,7 +326,9 @@ impl Filesystem for CatFS {
                     2,
                     FileType::Directory,
                     "..",
-                );
+                ) {
+                    unreachable!()
+                }
             }
 
             let mut stmt = self
@@ -383,7 +401,7 @@ mod tests {
     use std::iter;
     use std::ops::Deref;
 
-    use fuse::BackgroundSession;
+    use fuser::BackgroundSession;
     use rand::{thread_rng, Rng, RngCore};
     use tempfile::{tempdir, TempDir};
 
@@ -395,8 +413,8 @@ mod tests {
     // Helper struct to keep necessary variables in scope. To not make the compiler complain,
     // prefix them with an underscore. If for example the TempDir variables are not kept in scope
     // this way, the directories would be deleted before the tests can be run.
-    struct TempSession<'a> {
-        _session: BackgroundSession<'a>,
+    struct TempSession {
+        _session: BackgroundSession,
         _mirror: TempDir,
         pub(crate) mountpoint: TempDir,
     }
@@ -404,7 +422,7 @@ mod tests {
     fn mount_and_create_files_with_symlinks<'a>(
         files: &Vec<(String, Vec<u8>)>,
         symlinks: Vec<(String, String)>,
-    ) -> Result<TempSession<'a>, std::io::Error> {
+    ) -> Result<TempSession, std::io::Error> {
         let mirror = tempdir()?;
         let mountpoint = tempdir()?;
 
@@ -423,7 +441,7 @@ mod tests {
 
     fn mount_and_create_files<'a>(
         files: &Vec<(String, Vec<u8>)>,
-    ) -> Result<TempSession<'a>, std::io::Error> {
+    ) -> Result<TempSession, std::io::Error> {
         mount_and_create_files_with_symlinks(files, Vec::new())
     }
 
@@ -436,13 +454,13 @@ mod tests {
 
         (0..num_files)
             .flat_map(|file_num| {
-                let max_num_fragments = rng.gen_range(1, max_num_fragments);
+                let max_num_fragments = rng.gen_range(1..max_num_fragments);
                 (0..max_num_fragments)
                     .map(|fragment_num| {
                         let file_name = format!("file_{}/scfs.{:010}", file_num, fragment_num);
 
                         let fragment_size = if fragment_num == max_num_fragments - 1 && rng.gen() {
-                            rng.gen_range(1, blocksize + 1)
+                            rng.gen_range(1..(blocksize + 1))
                         } else {
                             blocksize
                         };

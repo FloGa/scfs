@@ -5,22 +5,24 @@ use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
 use std::{fs, thread};
 
-use fuse::{
+use fuser::{
     FileAttr, FileType, Filesystem, ReplyAttr, ReplyData, ReplyDirectory, ReplyEmpty, ReplyEntry,
     ReplyOpen, Request,
 };
 use libc::ENOENT;
-use rusqlite::{params, Connection, NO_PARAMS};
+use rusqlite::{params, Connection};
 
 use crate::{
     convert_filetype, convert_metadata_to_attr, Config, DropHookFn, FileHandle, FileInfo,
-    FileInfoRow, Shared, CONFIG_FILE_NAME, INO_CONFIG, INO_OUTSIDE, INO_ROOT, STMT_CREATE,
-    STMT_CREATE_INDEX_PARENT_INO_FILE_NAME, STMT_INSERT, STMT_QUERY_BY_PARENT_INO, TTL,
+    FileInfoRow, Shared, CONFIG_FILE_NAME, INO_CONFIG, INO_FIRST_FREE, INO_OUTSIDE, INO_ROOT,
+    STMT_CREATE, STMT_CREATE_INDEX_PARENT_INO_FILE_NAME, STMT_INSERT, STMT_QUERY_BY_PARENT_INO,
+    TTL,
 };
 
 pub(crate) struct SplitFS {
     file_db: Connection,
     file_handles: HashMap<u64, FileHandle>,
+    next_fh: u64,
     config: Config,
     config_json: String,
     drop_hook: DropHookFn,
@@ -70,12 +72,12 @@ impl SplitFS {
     pub(crate) fn new(mirror: &OsStr, config: Config, drop_hook: DropHookFn) -> Self {
         let file_db = Connection::open_in_memory().unwrap();
 
-        file_db.execute(STMT_CREATE, NO_PARAMS).unwrap();
+        file_db.execute(STMT_CREATE, []).unwrap();
 
-        SplitFS::populate(&file_db, &mirror, &config, INO_OUTSIDE);
+        SplitFS::populate(&file_db, &mirror, &config, INO_OUTSIDE, INO_FIRST_FREE);
 
         file_db
-            .execute(STMT_CREATE_INDEX_PARENT_INO_FILE_NAME, NO_PARAMS)
+            .execute(STMT_CREATE_INDEX_PARENT_INO_FILE_NAME, [])
             .unwrap();
 
         let file_handles = Default::default();
@@ -85,6 +87,7 @@ impl SplitFS {
         SplitFS {
             file_db,
             file_handles,
+            next_fh: 0,
             config,
             config_json,
             drop_hook,
@@ -101,13 +104,19 @@ impl SplitFS {
         attr
     }
 
-    fn populate<P: AsRef<Path>>(file_db: &Connection, path: P, config: &Config, parent_ino: u64) {
+    fn populate<P: AsRef<Path>>(
+        file_db: &Connection,
+        path: P,
+        config: &Config,
+        parent_ino: u64,
+        mut next_ino: u64,
+    ) -> u64 {
         let path = path.as_ref();
 
         let meta = path.symlink_metadata().unwrap();
 
         if let None = convert_filetype(meta.file_type()) {
-            return;
+            return next_ino;
         }
 
         let mut attr = convert_metadata_to_attr(meta, None);
@@ -115,7 +124,9 @@ impl SplitFS {
         attr.ino = if parent_ino == INO_OUTSIDE {
             INO_ROOT
         } else {
-            time::precise_time_ns()
+            let ino = next_ino;
+            next_ino += 1;
+            ino
         };
 
         let file_info = FileInfoRow::from(FileInfo {
@@ -150,7 +161,11 @@ impl SplitFS {
                 for i in 0..blocks {
                     let file_name = format!("scfs.{:010}", i).into();
                     let file_info = FileInfoRow::from(FileInfo {
-                        ino: attr.ino + i + 1,
+                        ino: {
+                            let ino = attr.ino + i + 1;
+                            next_ino = ino + 1;
+                            ino
+                        },
                         parent_ino: attr.ino,
                         path: OsString::from(path.join(&file_name)),
                         file_name,
@@ -178,18 +193,21 @@ impl SplitFS {
             FileType::Directory => {
                 for entry in fs::read_dir(path).unwrap() {
                     let entry = entry.unwrap();
-                    SplitFS::populate(&file_db, entry.path(), &config, attr.ino);
+                    next_ino =
+                        SplitFS::populate(&file_db, entry.path(), &config, attr.ino, next_ino);
                 }
             }
 
             _ => {}
         }
+
+        next_ino
     }
 }
 
 impl Drop for SplitFS {
     fn drop(&mut self) {
-        &(self.drop_hook)();
+        let _ = &(self.drop_hook)();
     }
 }
 
@@ -218,7 +236,7 @@ impl Filesystem for SplitFS {
         Shared::readlink(self, _req, ino, reply);
     }
 
-    fn open(&mut self, _req: &Request, ino: u64, _flags: u32, reply: ReplyOpen) {
+    fn open(&mut self, _req: &Request, ino: u64, _flags: i32, reply: ReplyOpen) {
         if ino == INO_CONFIG {
             reply.opened(0, 0);
             return;
@@ -233,7 +251,8 @@ impl Filesystem for SplitFS {
 
             let start = (file_info.part - 1) * self.config.blocksize;
             let end = start + self.config.blocksize;
-            let fh = time::precise_time_ns();
+            let fh = self.next_fh;
+            self.next_fh += 1;
 
             self.file_handles
                 .insert(fh, FileHandle { file, start, end });
@@ -246,11 +265,13 @@ impl Filesystem for SplitFS {
 
     fn read(
         &mut self,
-        _req: &Request,
+        _req: &Request<'_>,
         ino: u64,
         fh: u64,
         offset: i64,
         size: u32,
+        _flags: i32,
+        _lock_owner: Option<u64>,
         reply: ReplyData,
     ) {
         if ino == INO_CONFIG {
@@ -285,11 +306,11 @@ impl Filesystem for SplitFS {
 
     fn release(
         &mut self,
-        _req: &Request,
+        _req: &Request<'_>,
         ino: u64,
         fh: u64,
-        _flags: u32,
-        _lock_owner: u64,
+        _flags: i32,
+        _lock_owner: Option<u64>,
         _flush: bool,
         reply: ReplyEmpty,
     ) {
@@ -319,12 +340,14 @@ impl Filesystem for SplitFS {
             let mut additional_offset = 0;
             if offset < 3 {
                 if offset < 1 {
-                    reply.add(file_info.ino, 1, FileType::Directory, ".");
+                    if reply.add(file_info.ino, 1, FileType::Directory, ".") {
+                        unreachable!()
+                    }
                     additional_offset += 1;
                 }
 
                 if offset < 2 {
-                    reply.add(
+                    if reply.add(
                         if file_info.parent_ino == INO_OUTSIDE {
                             file_info.ino
                         } else {
@@ -333,13 +356,17 @@ impl Filesystem for SplitFS {
                         2,
                         FileType::Directory,
                         "..",
-                    );
+                    ) {
+                        unreachable!()
+                    }
                     additional_offset += 1;
                 }
 
                 if offset < 3 {
                     if file_info.ino == INO_ROOT {
-                        reply.add(INO_CONFIG, 3, FileType::RegularFile, CONFIG_FILE_NAME);
+                        if reply.add(INO_CONFIG, 3, FileType::RegularFile, CONFIG_FILE_NAME) {
+                            unreachable!()
+                        }
                         additional_offset += 1;
                     }
                 }
@@ -405,7 +432,7 @@ mod tests {
     use std::fs::{read, DirEntry};
     use std::path::PathBuf;
 
-    use fuse::BackgroundSession;
+    use fuser::BackgroundSession;
     use rand::{Rng, RngCore};
     use tempfile::{tempdir, TempDir};
 
@@ -417,8 +444,8 @@ mod tests {
     // Helper struct to keep necessary variables in scope. To not make the compiler complain,
     // prefix them with an underscore. If for example the TempDir variables are not kept in scope
     // this way, the directories would be deleted before the tests can be run.
-    struct TempSession<'a> {
-        _session: BackgroundSession<'a>,
+    struct TempSession {
+        _session: BackgroundSession,
         _mirror: TempDir,
         pub(crate) mountpoint: TempDir,
     }
@@ -427,7 +454,7 @@ mod tests {
         files: Vec<(String, Vec<u8>)>,
         symlinks: Vec<(String, String)>,
         config: Option<Config>,
-    ) -> Result<TempSession<'a>, std::io::Error> {
+    ) -> Result<TempSession, std::io::Error> {
         let mirror = tempdir()?;
         let mountpoint = tempdir()?;
 
@@ -451,14 +478,14 @@ mod tests {
     fn mount_and_create_files<'a>(
         files: Vec<(String, Vec<u8>)>,
         config: Option<Config>,
-    ) -> Result<TempSession<'a>, std::io::Error> {
+    ) -> Result<TempSession, std::io::Error> {
         mount_and_create_files_with_symlinks(files, Vec::new(), config)
     }
 
     fn mount_and_create_seq_files<'a>(
         num_files: usize,
         config: Option<Config>,
-    ) -> Result<TempSession<'a>, std::io::Error> {
+    ) -> Result<TempSession, std::io::Error> {
         let files = (0..num_files)
             .map(|i| {
                 let i_as_string = format!("{}", i);
