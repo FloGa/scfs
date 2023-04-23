@@ -1,0 +1,12 @@
+#!/bin/bash
+
+case "$1" in
+    macos-latest)
+        brew update
+        brew install macfuse
+        ;;
+    ubuntu-latest | *)
+        sudo apt-get -y update
+        sudo apt-get -y install libfuse3-dev
+        ;;
+esac
