@@ -205,7 +205,7 @@ use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use fuser::{BackgroundSession, FileAttr, FileType, Filesystem};
+use fuser::{BackgroundSession, FileAttr, FileType, Filesystem, MountOption};
 use rusqlite::Row;
 use serde::{Deserialize, Serialize};
 
@@ -311,19 +311,51 @@ fn convert_metadata_to_attr(meta: Metadata, ino: Option<u64>) -> FileAttr {
     }
 }
 
+// Copied from fuser, mount_options.rs. When this becomes part of their public API, delete this function.
+fn mount_option_from_str(s: &str) -> MountOption {
+    match s {
+        "auto_unmount" => MountOption::AutoUnmount,
+        "allow_other" => MountOption::AllowOther,
+        "allow_root" => MountOption::AllowRoot,
+        "default_permissions" => MountOption::DefaultPermissions,
+        "dev" => MountOption::Dev,
+        "nodev" => MountOption::NoDev,
+        "suid" => MountOption::Suid,
+        "nosuid" => MountOption::NoSuid,
+        "ro" => MountOption::RO,
+        "rw" => MountOption::RW,
+        "exec" => MountOption::Exec,
+        "noexec" => MountOption::NoExec,
+        "atime" => MountOption::Atime,
+        "noatime" => MountOption::NoAtime,
+        "dirsync" => MountOption::DirSync,
+        "sync" => MountOption::Sync,
+        "async" => MountOption::Async,
+        x if x.starts_with("fsname=") => MountOption::FSName(x[7..].into()),
+        x if x.starts_with("subtype=") => MountOption::Subtype(x[8..].into()),
+        x => MountOption::CUSTOM(x.into()),
+    }
+}
+
 fn mount<'a, 'b, FS, P, I>(filesystem: FS, mountpoint: &P, fuse_options: I) -> BackgroundSession
 where
     FS: Filesystem + Send + 'static + 'a,
     P: AsRef<Path>,
     I: IntoIterator<Item = &'b OsStr>,
 {
-    let options = ["ro", "fsname=scfs"]
-        .iter()
-        .map(|o| o.as_ref())
-        .chain(fuse_options)
-        .collect::<Vec<_>>();
+    let fuse_options = fuse_options
+        .into_iter()
+        .map(|x| mount_option_from_str(x.to_str().unwrap()));
 
-    fuser::spawn_mount(filesystem, &mountpoint, &options).unwrap()
+    let options = {
+        let mut options = vec![MountOption::RO, MountOption::FSName(String::from("scfs"))];
+        for opt in fuse_options {
+            options.push(opt);
+        }
+        options
+    };
+
+    fuser::spawn_mount2(filesystem, &mountpoint, options.as_ref()).unwrap()
 }
 
 struct FileHandle {

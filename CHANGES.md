@@ -1,5 +1,11 @@
 # Changes since latest release
 
+# Changes in 0.9.2
+
+-   Update dependencies to get security fixes
+
+-   Avoid using deprecated fucntion mount_spawn
+
 # Changes in 0.9.1
 
 Update dependencies to fix security issues. Furthermore:
