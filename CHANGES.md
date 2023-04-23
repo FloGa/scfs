@@ -1,4 +1,4 @@
-# Changes in 0.9.2-RC
+# Changes in 0.9.2
 
 -   Update dependencies to get security fixes
 
