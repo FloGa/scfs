@@ -1,12 +1,13 @@
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::iter::FromIterator;
 use std::path::Path;
 use std::sync::mpsc::channel;
 
+use clap::error::Result as ClapResult;
 use clap::{
-    arg_enum, crate_authors, crate_description, crate_name, crate_version, App, Arg, ArgMatches,
-    Result,
+    crate_authors, crate_description, crate_name, crate_version, Arg, ArgAction, ArgMatches,
+    Command, ValueEnum,
 };
 use daemonize::Daemonize;
 
@@ -21,33 +22,32 @@ const ARG_FUSE_OPTIONS_EXTRA: &str = "fuse_options_extra";
 const ARG_DAEMON: &str = "daemon";
 const ARG_MKDIR: &str = "mkdir";
 
-arg_enum! {
-    pub enum Cli {
-        SCFS,
-        SplitFS,
-        CatFS,
-    }
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub enum Cli {
+    SCFS,
+    SplitFS,
+    CatFS,
 }
 
 impl Cli {
-    fn get_arguments<'a>(&self) -> Result<ArgMatches<'a>> {
+    fn get_arguments<'a>(&self) -> ClapResult<ArgMatches> {
         let app = match self {
             Cli::SCFS => app_scfs().args(&args_scfs()),
             Cli::SplitFS => app_splitfs().args(&args_splitfs()),
             Cli::CatFS => app_catfs().args(&args_catfs()),
         };
-        app.get_matches_safe()
+        app.try_get_matches()
     }
 
     pub fn run(&self) {
         let arguments = self.get_arguments().unwrap_or_else(|e| e.exit());
 
-        let mode = arguments.value_of(ARG_MODE);
-        let mirror = arguments.value_of_os(ARG_MIRROR).unwrap();
-        let mountpoint = arguments.value_of_os(ARG_MOUNTPOINT).unwrap();
-        let blocksize = arguments.value_of(ARG_BLOCKSIZE);
-        let daemonize = arguments.is_present(ARG_DAEMON);
-        let mkdir = arguments.is_present(ARG_MKDIR);
+        let mode = arguments.get_one::<String>(ARG_MODE);
+        let mirror = arguments.get_one::<OsString>(ARG_MIRROR).unwrap();
+        let mountpoint = arguments.get_one::<OsString>(ARG_MOUNTPOINT).unwrap();
+        let blocksize = arguments.get_one::<String>(ARG_BLOCKSIZE);
+        let daemonize = arguments.get_flag(ARG_DAEMON);
+        let mkdir = arguments.get_flag(ARG_MKDIR);
 
         let (mirror, mountpoint) = {
             let mirror = Path::new(mirror);
@@ -79,11 +79,11 @@ impl Cli {
         };
 
         let fuse_options = arguments
-            .values_of_os(ARG_FUSE_OPTIONS)
+            .get_many::<OsString>(ARG_FUSE_OPTIONS)
             .unwrap_or_default()
             .chain(
                 arguments
-                    .values_of_os(ARG_FUSE_OPTIONS_EXTRA)
+                    .get_many::<OsString>(ARG_FUSE_OPTIONS_EXTRA)
                     .unwrap_or_default(),
             )
             .flat_map(|option| vec![OsStr::new("-o"), option]);
@@ -102,7 +102,7 @@ impl Cli {
             tx_quitter.send(true).unwrap_or(());
         });
 
-        let _session = match (self, mode) {
+        let _session = match (self, mode.map(|s| s.as_str())) {
             (Cli::CatFS, _) | (Cli::SCFS, Some("cat")) => {
                 let fs = CatFS::new(&mirror, drop_hook);
                 if daemonize {
@@ -129,63 +129,63 @@ impl Cli {
     }
 }
 
-fn app_base<'a, 'b>() -> App<'a, 'b> {
-    App::new(crate_name!())
+fn app_base<'a, 'b>() -> Command {
+    Command::new(crate_name!())
         .version(crate_version!())
         .author(crate_authors!())
 }
 
-fn app_scfs<'a, 'b>() -> App<'a, 'b> {
+fn app_scfs<'a, 'b>() -> Command {
     app_base().about(crate_description!())
 }
 
-fn app_catfs<'a, 'b>() -> App<'a, 'b> {
+fn app_catfs<'a, 'b>() -> Command {
     app_base().about("This is a convenience wrapper for the concatenating part of SCFS.")
 }
 
-fn app_splitfs<'a, 'b>() -> App<'a, 'b> {
+fn app_splitfs<'a, 'b>() -> Command {
     app_base().about("This is a convenience wrapper for the splitting part of SCFS.")
 }
 
-fn args_base<'a, 'b>() -> Vec<Arg<'a, 'b>> {
+fn args_base<'a, 'b>() -> Vec<Arg> {
     vec![
-        Arg::with_name(ARG_FUSE_OPTIONS)
-            .short("o")
+        Arg::new(ARG_FUSE_OPTIONS)
+            .short('o')
             .help("Additional options, which are passed down to FUSE")
-            .multiple(true)
-            .takes_value(true)
+            .action(ArgAction::Append)
             .number_of_values(1),
-        Arg::with_name(ARG_MIRROR)
+        Arg::new(ARG_MIRROR)
             .help("Defines the directory that will be mirrored")
             .required(true),
-        Arg::with_name(ARG_MOUNTPOINT)
+        Arg::new(ARG_MOUNTPOINT)
             .help("Defines the mountpoint, where the mirror will be accessible")
             .required(true),
-        Arg::with_name(ARG_DAEMON)
-            .short(&ARG_DAEMON[0..1])
+        Arg::new(ARG_DAEMON)
+            .short(ARG_DAEMON.chars().next())
             .long(ARG_DAEMON)
+            .action(ArgAction::SetTrue)
             .help("Run program in background"),
-        Arg::with_name(ARG_MKDIR)
+        Arg::new(ARG_MKDIR)
             .long(ARG_MKDIR)
+            .action(ArgAction::SetTrue)
             .help("Create mountpoint directory if it does not exist already"),
-        Arg::with_name(ARG_FUSE_OPTIONS_EXTRA)
+        Arg::new(ARG_FUSE_OPTIONS_EXTRA)
             .help("Additional options, which are passed down to FUSE")
-            .multiple(true)
+            .action(ArgAction::Append)
             .last(true),
     ]
 }
 
-fn args_scfs_only<'a, 'b>() -> Vec<Arg<'a, 'b>> {
-    vec![Arg::with_name(ARG_MODE)
-        .short(&ARG_MODE[0..1])
+fn args_scfs_only<'a, 'b>() -> Vec<Arg> {
+    vec![Arg::new(ARG_MODE)
+        .short(ARG_MODE.chars().next())
         .long(ARG_MODE)
         .help("Sets the desired mode")
-        .takes_value(true)
-        .possible_values(&["split", "cat"])
+        .value_parser(["split", "cat"])
         .required(true)]
 }
 
-fn args_scfs<'a, 'b>() -> Vec<Arg<'a, 'b>> {
+fn args_scfs<'a, 'b>() -> Vec<Arg> {
     let mut args = args_base();
     args.append(args_catfs_only().as_mut());
     args.append(args_splitfs_only().as_mut());
@@ -193,35 +193,34 @@ fn args_scfs<'a, 'b>() -> Vec<Arg<'a, 'b>> {
     args
 }
 
-fn args_catfs_only<'a, 'b>() -> Vec<Arg<'a, 'b>> {
+fn args_catfs_only<'a, 'b>() -> Vec<Arg> {
     vec![]
 }
 
-fn args_catfs<'a, 'b>() -> Vec<Arg<'a, 'b>> {
+fn args_catfs<'a, 'b>() -> Vec<Arg> {
     let mut args = args_base();
     args.append(args_catfs_only().as_mut());
     args
 }
 
-fn args_splitfs_only<'a, 'b>() -> Vec<Arg<'a, 'b>> {
+fn args_splitfs_only<'a, 'b>() -> Vec<Arg> {
     let default_blocksize = Box::new(CONFIG_DEFAULT_BLOCKSIZE.to_string());
-    let default_blocksize: &'a String = Box::leak(default_blocksize);
+    let default_blocksize: &'static String = Box::leak(default_blocksize);
 
-    vec![Arg::with_name(ARG_BLOCKSIZE)
-        .short(&ARG_BLOCKSIZE[0..1])
+    vec![Arg::new(ARG_BLOCKSIZE)
+        .short(ARG_BLOCKSIZE.chars().next())
         .long(ARG_BLOCKSIZE)
         .help("Sets the desired blocksize")
-        .takes_value(true)
-        .default_value(&default_blocksize)]
+        .default_value(Some(default_blocksize.as_str()))]
 }
 
-fn args_splitfs<'a, 'b>() -> Vec<Arg<'a, 'b>> {
+fn args_splitfs<'a, 'b>() -> Vec<Arg> {
     let mut args = args_base();
     args.append(args_splitfs_only().as_mut());
     args
 }
 
-fn convert_symbolic_quantity<S: Into<String>>(s: S) -> std::result::Result<u64, &'static str> {
+fn convert_symbolic_quantity<S: Into<String>>(s: S) -> Result<u64, &'static str> {
     let s = s.into();
     let s = s.trim();
     let digits = String::from_iter(s.chars().take_while(|c| c.is_ascii_digit()).fuse());
@@ -252,26 +251,15 @@ fn convert_symbolic_quantity<S: Into<String>>(s: S) -> std::result::Result<u64, 
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
-
     use super::*;
 
     #[test]
     fn test_get_arguments_for_variant() {
-        for variant in &Cli::variants() {
+        for variant in Cli::value_variants() {
             println!("Testing {:?}", variant);
-            let variant = Cli::from_str(variant).unwrap();
+            // let variant = Cli::from_str(variant).unwrap();
             // This call must not panic.
             let _args = variant.get_arguments();
-        }
-    }
-
-    #[test]
-    fn test_unknown_variant() -> std::result::Result<(), String> {
-        match Cli::from_str("unknown") {
-            Err(e) if e == "valid values: SCFS, SplitFS, CatFS" => Ok(()),
-            Err(e) => Err(format!("Unexpected error: {}", e)),
-            Ok(_) => Err(String::from("Did not result in Error")),
         }
     }
 
