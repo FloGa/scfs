@@ -65,7 +65,7 @@ cargo install scfs
 To mount a directory with SplitFS, use the following form:
 
 ```shell script
-scfs --mode=split <base directory> <mount point>
+scfs split <base directory> <mount point>
 ```
 
 This can be simplified by using the dedicated `splitfs` binary:
@@ -113,7 +113,7 @@ metadata table grows too large.
 To mount a directory with CatFS, use the following form:
 
 ```shell script
-scfs --mode=cat <base directory> <mount point>
+scfs cat <base directory> <mount point>
 ```
 
 This can be simplified by using the dedicated `catfs` binary:
@@ -140,8 +140,8 @@ other FUSE based filesystems like EncFS.
 These two calls are equivalent:
     
 ```shell script
-scfs --mode=split -o nonempty mirror mountpoint
-scfs --mode=split mirror mountpoint -- nonempty
+scfs split -o nonempty mirror mountpoint
+scfs split mirror mountpoint -- nonempty
 ```
 
 Of course, these methods also work in the `splitfs` and `catfs` binaries.
