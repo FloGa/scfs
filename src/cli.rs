@@ -217,6 +217,24 @@ mod tests {
     use super::*;
 
     #[test]
+    fn verify_cli_scfs() {
+        use clap::CommandFactory;
+        CommandScfs::command().debug_assert()
+    }
+
+    #[test]
+    fn verify_cli_splitfs() {
+        use clap::CommandFactory;
+        CommandSplitFs::command().debug_assert()
+    }
+
+    #[test]
+    fn verify_cli_catfs() {
+        use clap::CommandFactory;
+        CommandCatFs::command().debug_assert()
+    }
+
+    #[test]
     fn test_symbolic_quantity_converter() {
         let sym_exp = vec![("", 0), ("K", 1), ("M", 2), ("G", 3), ("T", 4)];
         for (sym, exp) in sym_exp {
