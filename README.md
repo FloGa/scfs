@@ -60,7 +60,17 @@ cargo install scfs
 
 ## Usage
 
+<!--% !cargo --quiet run -- --help | tail -n+3 %-->
+
+```text
+```
+
 ### SplitFS
+
+<!--% !cargo --quiet run -- split --help | tail -n+3 %-->
+
+```text
+```
 
 To mount a directory with SplitFS, use the following form:
 
@@ -109,6 +119,11 @@ for a ridiculous amount of overhead or maybe even a system freeze because the
 metadata table grows too large.
 
 ### CatFS
+
+<!--% !cargo --quiet run -- cat --help | tail -n+3 %-->
+
+```text
+```
 
 To mount a directory with CatFS, use the following form:
 
