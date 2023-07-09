@@ -1,5 +1,7 @@
+use std::error::Error;
+
 use scfs::Cli;
 
-fn main() {
-    Cli::SplitFS.run();
+fn main() -> Result<(), Box<dyn Error>> {
+    Cli::SplitFS.run()
 }
