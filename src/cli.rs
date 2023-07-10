@@ -1,64 +1,124 @@
-use std::ffi::OsStr;
+use std::error::Error;
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::iter::FromIterator;
-use std::path::Path;
+use std::path::PathBuf;
 use std::sync::mpsc::channel;
 
-use clap::{
-    arg_enum, crate_authors, crate_description, crate_name, crate_version, App, Arg, ArgMatches,
-    Result,
-};
+use clap::{Args, Parser, Subcommand};
 use daemonize::Daemonize;
 
 use crate::{mount, CatFS, Config, SplitFS, CONFIG_DEFAULT_BLOCKSIZE};
 
-const ARG_MODE: &str = "mode";
-const ARG_MIRROR: &str = "mirror";
-const ARG_MOUNTPOINT: &str = "mountpoint";
-const ARG_BLOCKSIZE: &str = "blocksize";
-const ARG_FUSE_OPTIONS: &str = "fuse_options";
-const ARG_FUSE_OPTIONS_EXTRA: &str = "fuse_options_extra";
-const ARG_DAEMON: &str = "daemon";
-const ARG_MKDIR: &str = "mkdir";
+pub enum Cli {
+    SCFS,
+    SplitFS,
+    CatFS,
+}
 
-arg_enum! {
-    pub enum Cli {
-        SCFS,
-        SplitFS,
-        CatFS,
-    }
+#[derive(Parser)]
+#[command(author, version, about, long_about = None)]
+#[command(propagate_version = true)]
+struct CommandScfs {
+    #[command(flatten)]
+    args: ArgsScfs,
+}
+
+#[derive(Parser)]
+#[command(author, version, long_about = None)]
+#[command(about = "This is a convenience wrapper for the splitting part of SCFS.")]
+struct CommandSplitFs {
+    #[command(flatten)]
+    args: ArgsSplit,
+}
+
+#[derive(Parser)]
+#[command(author, version, long_about = None)]
+#[command(about = "This is a convenience wrapper for the concatenating part of SCFS.")]
+struct CommandCatFs {
+    #[command(flatten)]
+    args: ArgsCat,
+}
+
+#[derive(Debug, Subcommand)]
+enum Mode {
+    /// Create a splitting file system
+    Split(ArgsSplit),
+
+    /// Create a concatenating file system
+    Cat(ArgsCat),
+}
+
+#[derive(Args, Debug)]
+struct ArgsScfs {
+    #[command(subcommand)]
+    mode: Mode,
+}
+
+#[derive(Args, Debug)]
+struct ArgsCommon {
+    /// Defines the directory that will be mirrored
+    mirror: PathBuf,
+
+    /// Defines the mountpoint, where the mirror will be accessible
+    mountpoint: PathBuf,
+
+    /// Additional options, which are passed down to FUSE
+    #[arg(long, short = 'o')]
+    fuse_options: Vec<OsString>,
+
+    /// Run program in background
+    #[arg(long, short = 'd')]
+    daemon: bool,
+
+    /// Create mountpoint directory if it does not exist already
+    #[arg(long)]
+    mkdir: bool,
+
+    /// Additional options, which are passed down to FUSE
+    #[arg(last = true)]
+    fuse_options_extra: Vec<OsString>,
+}
+
+#[derive(Args, Debug)]
+struct ArgsSplit {
+    /// Sets the desired blocksize
+    #[arg(long, short = 'b', value_parser = convert_symbolic_quantity, default_value_t = CONFIG_DEFAULT_BLOCKSIZE)]
+    blocksize: u64,
+
+    #[command(flatten)]
+    args_common: ArgsCommon,
+}
+
+#[derive(Args, Debug)]
+struct ArgsCat {
+    #[command(flatten)]
+    args_common: ArgsCommon,
 }
 
 impl Cli {
-    fn get_arguments<'a>(&self) -> Result<ArgMatches<'a>> {
-        let app = match self {
-            Cli::SCFS => app_scfs().args(&args_scfs()),
-            Cli::SplitFS => app_splitfs().args(&args_splitfs()),
-            Cli::CatFS => app_catfs().args(&args_catfs()),
+    pub fn run(&self) -> Result<(), Box<dyn Error>> {
+        let mode = match self {
+            Cli::SCFS => CommandScfs::parse().args.mode,
+            Cli::SplitFS => Mode::Split(CommandSplitFs::parse().args),
+            Cli::CatFS => Mode::Cat(CommandCatFs::parse().args),
         };
-        app.get_matches_safe()
-    }
 
-    pub fn run(&self) {
-        let arguments = self.get_arguments().unwrap_or_else(|e| e.exit());
-
-        let mode = arguments.value_of(ARG_MODE);
-        let mirror = arguments.value_of_os(ARG_MIRROR).unwrap();
-        let mountpoint = arguments.value_of_os(ARG_MOUNTPOINT).unwrap();
-        let blocksize = arguments.value_of(ARG_BLOCKSIZE);
-        let daemonize = arguments.is_present(ARG_DAEMON);
-        let mkdir = arguments.is_present(ARG_MKDIR);
+        let args_common = match &mode {
+            Mode::Split(args) => &args.args_common,
+            Mode::Cat(args) => &args.args_common,
+        };
 
         let (mirror, mountpoint) = {
-            let mirror = Path::new(mirror);
-            let mountpoint = Path::new(mountpoint);
+            let mirror = &args_common.mirror;
+            let mountpoint = &args_common.mountpoint;
 
             if !mirror.exists() {
                 panic!("Mirror path does not exist: {:?}", mirror)
             }
 
             if !mountpoint.exists() {
-                if mkdir {
+                if args_common.mkdir {
                     fs::create_dir_all(mountpoint).unwrap();
                 } else {
                     panic!("Mountpoint path does not exist: {:?}", mountpoint)
@@ -78,16 +138,6 @@ impl Cli {
             (mirror.into_os_string(), mountpoint.into_os_string())
         };
 
-        let fuse_options = arguments
-            .values_of_os(ARG_FUSE_OPTIONS)
-            .unwrap_or_default()
-            .chain(
-                arguments
-                    .values_of_os(ARG_FUSE_OPTIONS_EXTRA)
-                    .unwrap_or_default(),
-            )
-            .flat_map(|option| vec![OsStr::new("-o"), option]);
-
         let (tx_quitter, rx_quitter) = channel();
 
         {
@@ -102,138 +152,50 @@ impl Cli {
             tx_quitter.send(true).unwrap_or(());
         });
 
-        let _session = match (self, mode) {
-            (Cli::CatFS, _) | (Cli::SCFS, Some("cat")) => {
-                let fs = CatFS::new(&mirror, drop_hook);
-                if daemonize {
-                    Daemonize::new().start().expect("Failed to daemonize.");
-                }
-                mount(fs, &mountpoint, fuse_options)
-            }
+        let fuse_options = &args_common.fuse_options;
+        let fuse_options_extra = &args_common.fuse_options_extra;
 
-            (Cli::SplitFS, _) | (Cli::SCFS, Some("split")) => {
-                let blocksize = blocksize.unwrap();
-                let blocksize = convert_symbolic_quantity(blocksize).unwrap();
+        let fuse_options = fuse_options
+            .iter()
+            .chain(fuse_options_extra.iter())
+            .flat_map(|option| vec![OsStr::new("-o"), &option]);
+
+        if args_common.daemon {
+            Daemonize::new().start().expect("Failed to daemonize.");
+        }
+
+        let _session = match &mode {
+            Mode::Split(args) => {
+                let blocksize = args.blocksize;
                 let config = Config::default().blocksize(blocksize);
                 let fs = SplitFS::new(&mirror, config, drop_hook);
-                if daemonize {
-                    Daemonize::new().start().expect("Failed to daemonize.");
-                }
                 mount(fs, &mountpoint, fuse_options)
             }
 
-            _ => unreachable!(),
+            Mode::Cat(_args) => {
+                let fs = CatFS::new(&mirror, drop_hook);
+                mount(fs, &mountpoint, fuse_options)
+            }
         };
 
         rx_quitter.recv().expect("Could not join quitter channel.");
+
+        Ok(())
     }
 }
 
-fn app_base<'a, 'b>() -> App<'a, 'b> {
-    App::new(crate_name!())
-        .version(crate_version!())
-        .author(crate_authors!())
-}
-
-fn app_scfs<'a, 'b>() -> App<'a, 'b> {
-    app_base().about(crate_description!())
-}
-
-fn app_catfs<'a, 'b>() -> App<'a, 'b> {
-    app_base().about("This is a convenience wrapper for the concatenating part of SCFS.")
-}
-
-fn app_splitfs<'a, 'b>() -> App<'a, 'b> {
-    app_base().about("This is a convenience wrapper for the splitting part of SCFS.")
-}
-
-fn args_base<'a, 'b>() -> Vec<Arg<'a, 'b>> {
-    vec![
-        Arg::with_name(ARG_FUSE_OPTIONS)
-            .short("o")
-            .help("Additional options, which are passed down to FUSE")
-            .multiple(true)
-            .takes_value(true)
-            .number_of_values(1),
-        Arg::with_name(ARG_MIRROR)
-            .help("Defines the directory that will be mirrored")
-            .required(true),
-        Arg::with_name(ARG_MOUNTPOINT)
-            .help("Defines the mountpoint, where the mirror will be accessible")
-            .required(true),
-        Arg::with_name(ARG_DAEMON)
-            .short(&ARG_DAEMON[0..1])
-            .long(ARG_DAEMON)
-            .help("Run program in background"),
-        Arg::with_name(ARG_MKDIR)
-            .long(ARG_MKDIR)
-            .help("Create mountpoint directory if it does not exist already"),
-        Arg::with_name(ARG_FUSE_OPTIONS_EXTRA)
-            .help("Additional options, which are passed down to FUSE")
-            .multiple(true)
-            .last(true),
-    ]
-}
-
-fn args_scfs_only<'a, 'b>() -> Vec<Arg<'a, 'b>> {
-    vec![Arg::with_name(ARG_MODE)
-        .short(&ARG_MODE[0..1])
-        .long(ARG_MODE)
-        .help("Sets the desired mode")
-        .takes_value(true)
-        .possible_values(&["split", "cat"])
-        .required(true)]
-}
-
-fn args_scfs<'a, 'b>() -> Vec<Arg<'a, 'b>> {
-    let mut args = args_base();
-    args.append(args_catfs_only().as_mut());
-    args.append(args_splitfs_only().as_mut());
-    args.append(args_scfs_only().as_mut());
-    args
-}
-
-fn args_catfs_only<'a, 'b>() -> Vec<Arg<'a, 'b>> {
-    vec![]
-}
-
-fn args_catfs<'a, 'b>() -> Vec<Arg<'a, 'b>> {
-    let mut args = args_base();
-    args.append(args_catfs_only().as_mut());
-    args
-}
-
-fn args_splitfs_only<'a, 'b>() -> Vec<Arg<'a, 'b>> {
-    let default_blocksize = Box::new(CONFIG_DEFAULT_BLOCKSIZE.to_string());
-    let default_blocksize: &'a String = Box::leak(default_blocksize);
-
-    vec![Arg::with_name(ARG_BLOCKSIZE)
-        .short(&ARG_BLOCKSIZE[0..1])
-        .long(ARG_BLOCKSIZE)
-        .help("Sets the desired blocksize")
-        .takes_value(true)
-        .default_value(&default_blocksize)]
-}
-
-fn args_splitfs<'a, 'b>() -> Vec<Arg<'a, 'b>> {
-    let mut args = args_base();
-    args.append(args_splitfs_only().as_mut());
-    args
-}
-
-fn convert_symbolic_quantity<S: Into<String>>(s: S) -> std::result::Result<u64, &'static str> {
-    let s = s.into();
+fn convert_symbolic_quantity(s: &str) -> Result<u64, String> {
     let s = s.trim();
     let digits = String::from_iter(s.chars().take_while(|c| c.is_ascii_digit()).fuse());
 
     if digits.len() == 0 {
-        return Err("No digits given");
+        return Err(String::from("No digits given"));
     }
 
     let base = digits.parse::<u64>().unwrap();
 
     if base < 1 {
-        return Err("Base may not be zero or negative");
+        return Err(String::from("Base may not be zero or negative"));
     }
 
     let quantifier = s[digits.len()..].trim();
@@ -244,7 +206,7 @@ fn convert_symbolic_quantity<S: Into<String>>(s: S) -> std::result::Result<u64, 
         "M" => 2,
         "G" => 3,
         "T" => 4,
-        _ => return Err("Unkown quantifier"),
+        _ => return Err(String::from("Unkown quantifier")),
     };
 
     Ok(digits.parse::<u64>().unwrap() * 1024_u64.pow(exp))
@@ -252,27 +214,24 @@ fn convert_symbolic_quantity<S: Into<String>>(s: S) -> std::result::Result<u64, 
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
-
     use super::*;
 
     #[test]
-    fn test_get_arguments_for_variant() {
-        for variant in &Cli::variants() {
-            println!("Testing {:?}", variant);
-            let variant = Cli::from_str(variant).unwrap();
-            // This call must not panic.
-            let _args = variant.get_arguments();
-        }
+    fn verify_cli_scfs() {
+        use clap::CommandFactory;
+        CommandScfs::command().debug_assert()
     }
 
     #[test]
-    fn test_unknown_variant() -> std::result::Result<(), String> {
-        match Cli::from_str("unknown") {
-            Err(e) if e == "valid values: SCFS, SplitFS, CatFS" => Ok(()),
-            Err(e) => Err(format!("Unexpected error: {}", e)),
-            Ok(_) => Err(String::from("Did not result in Error")),
-        }
+    fn verify_cli_splitfs() {
+        use clap::CommandFactory;
+        CommandSplitFs::command().debug_assert()
+    }
+
+    #[test]
+    fn verify_cli_catfs() {
+        use clap::CommandFactory;
+        CommandCatFs::command().debug_assert()
     }
 
     #[test]
@@ -281,7 +240,7 @@ mod tests {
         for (sym, exp) in sym_exp {
             println!("Testing 1{}", sym);
             assert_eq!(
-                convert_symbolic_quantity(format!("1{}", sym)).unwrap(),
+                convert_symbolic_quantity(format!("1{}", sym).as_str()).unwrap(),
                 1024_u64.pow(exp)
             );
         }
