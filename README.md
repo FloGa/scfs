@@ -63,6 +63,16 @@ cargo install scfs
 <!--% !cargo --quiet run -- --help | tail -n+3 %-->
 
 ```text
+Usage: scfs <COMMAND>
+
+Commands:
+  split  Create a splitting file system
+  cat    Create a concatenating file system
+  help   Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help     Print help
+  -V, --version  Print version
 ```
 
 ### SplitFS
@@ -70,6 +80,20 @@ cargo install scfs
 <!--% !cargo --quiet run -- split --help | tail -n+3 %-->
 
 ```text
+Usage: scfs split [OPTIONS] <MIRROR> <MOUNTPOINT> [-- <FUSE_OPTIONS_EXTRA>...]
+
+Arguments:
+  <MIRROR>                 Defines the directory that will be mirrored
+  <MOUNTPOINT>             Defines the mountpoint, where the mirror will be accessible
+  [FUSE_OPTIONS_EXTRA]...  Additional options, which are passed down to FUSE
+
+Options:
+  -b, --blocksize <BLOCKSIZE>        Sets the desired blocksize [default: 2097152]
+  -o, --fuse-options <FUSE_OPTIONS>  Additional options, which are passed down to FUSE
+  -d, --daemon                       Run program in background
+      --mkdir                        Create mountpoint directory if it does not exist already
+  -h, --help                         Print help
+  -V, --version                      Print version
 ```
 
 To mount a directory with SplitFS, use the following form:
@@ -123,6 +147,19 @@ metadata table grows too large.
 <!--% !cargo --quiet run -- cat --help | tail -n+3 %-->
 
 ```text
+Usage: scfs cat [OPTIONS] <MIRROR> <MOUNTPOINT> [-- <FUSE_OPTIONS_EXTRA>...]
+
+Arguments:
+  <MIRROR>                 Defines the directory that will be mirrored
+  <MOUNTPOINT>             Defines the mountpoint, where the mirror will be accessible
+  [FUSE_OPTIONS_EXTRA]...  Additional options, which are passed down to FUSE
+
+Options:
+  -o, --fuse-options <FUSE_OPTIONS>  Additional options, which are passed down to FUSE
+  -d, --daemon                       Run program in background
+      --mkdir                        Create mountpoint directory if it does not exist already
+  -h, --help                         Print help
+  -V, --version                      Print version
 ```
 
 To mount a directory with CatFS, use the following form:
