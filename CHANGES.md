@@ -1,4 +1,4 @@
-# Changes since latest release
+# Changes in 0.10.0-RC
 
 # Changes in 0.9.2
 
