@@ -1,4 +1,4 @@
-# Changes in 0.10.0-RC
+# Changes in 0.10.0
 
 -   Upgrade to clap4
 
