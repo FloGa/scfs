@@ -1,5 +1,15 @@
 # Changes in 0.10.0-RC
 
+-   Upgrade to clap4
+
+-   Rework and simplify Cli
+
+    We now use the clap derive module to simplify the Cli. Also, split and
+    cat are now proper subcommands. Having them introduced as a non-optional
+    flag before was a poor decision.
+
+-   Update dependencies
+
 # Changes in 0.9.2
 
 -   Update dependencies to get security fixes
