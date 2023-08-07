@@ -26,6 +26,7 @@ struct CommandScfs {
 
 #[derive(Parser)]
 #[command(author, version, long_about = None)]
+#[command(name = "splitfs")]
 #[command(about = "This is a convenience wrapper for the splitting part of SCFS.")]
 struct CommandSplitFs {
     #[command(flatten)]
@@ -34,6 +35,7 @@ struct CommandSplitFs {
 
 #[derive(Parser)]
 #[command(author, version, long_about = None)]
+#[command(name = "catfs")]
 #[command(about = "This is a convenience wrapper for the concatenating part of SCFS.")]
 struct CommandCatFs {
     #[command(flatten)]
