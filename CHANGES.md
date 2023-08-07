@@ -1,5 +1,11 @@
 # Changes since latest release
 
+-   Give proper binary names to sub commands
+
+-   Add cli integration tests
+
+-   Update edition
+
 # Changes in 0.10.0
 
 -   Upgrade to clap4
