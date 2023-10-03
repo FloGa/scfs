@@ -1,5 +1,9 @@
 # Changes in 0.10.1-RC
 
+-   Upgrade fuser to get rid of abandoned users dep
+
+-   Update dependencies
+
 # Changes in 0.10.0
 
 -   Upgrade to clap4
