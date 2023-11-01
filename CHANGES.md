@@ -1,5 +1,7 @@
 # Changes in 0.10.2-RC
 
+-   Update dependencies for security fixes
+
 # Changes in 0.10.1
 
 -   Upgrade fuser to get rid of abandoned users dep
