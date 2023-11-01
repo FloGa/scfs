@@ -1,4 +1,4 @@
-# Changes in 0.10.2-RC
+# Changes in 0.10.2
 
 -   Update dependencies for security fixes
 
