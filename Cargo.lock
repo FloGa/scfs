@@ -565,7 +565,7 @@ checksum = "f98d2aa92eebf49b69786be48e4477826b256916e84a57ff2a4f21923b48eb4c"
 
 [[package]]
 name = "scfs"
-version = "0.10.3"
+version = "0.11.0-SNAPSHOT"
 dependencies = [
  "assert_cmd",
  "clap",
