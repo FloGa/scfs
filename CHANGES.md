@@ -1,5 +1,7 @@
 # Changes in 0.10.3-RC
 
+-   Update dependencies for security fixes
+
 # Changes in 0.10.2
 
 -   Update dependencies for security fixes
