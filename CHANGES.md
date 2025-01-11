@@ -1,5 +1,11 @@
 # Changes in 0.10.4-RC
 
+-   Update dependencies for security fixes
+
+-   Fix runners configuration
+
+-   Remove MacOS runner due to problems
+
 # Changes in 0.10.3
 
 -   Update dependencies for security fixes
