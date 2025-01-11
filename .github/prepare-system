@@ -7,6 +7,6 @@ case "$1" in
         ;;
     ubuntu-latest | *)
         sudo apt-get -y update
-        sudo apt-get -y install libfuse3-dev
+        sudo apt-get -y install libfuse3-dev libsqlite3-dev
         ;;
 esac
