@@ -3,10 +3,9 @@ name: Release
 on:
   push:
     branches:
+      - master
       - 'hotfix/**'
       - 'release/**'
-    tags-ignore:
-      - '_**'
 
   workflow_dispatch:
 
@@ -17,10 +16,10 @@ jobs:
       test-args: -- --include-ignored
 
   call-release-workflow:
-    uses: FloGa/rust-workflows/.github/workflows/release.yml@0.2.0
+    uses: FloGa/rust-workflows/.github/workflows/release.yml@0.5.0
     with:
-      targets-config: ./.github/targets.json
       system-preparation: ./.github/prepare-system
+      targets-config: ./.github/targets.json
     secrets:
       CRATES_IO_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
     needs:

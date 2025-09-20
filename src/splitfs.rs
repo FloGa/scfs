@@ -222,7 +222,7 @@ impl Filesystem for SplitFS {
         Shared::lookup(self, _req, parent, name, reply);
     }
 
-    fn getattr(&mut self, _req: &Request, ino: u64, reply: ReplyAttr) {
+    fn getattr(&mut self, _req: &Request, ino: u64, _fh: Option<u64>, reply: ReplyAttr) {
         if ino == INO_CONFIG {
             let attr = self.get_config_attr();
             reply.attr(&TTL, &attr);
@@ -683,17 +683,17 @@ mod tests {
 
         let num_files = 100;
 
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let files = (0..num_files)
             .map(|i| {
                 let file_name = format!(
                     "{}/{}/{}/{}/{}/{}",
                     i,
-                    rng.gen::<u32>(),
-                    rng.gen::<u32>(),
-                    rng.gen::<u32>(),
-                    rng.gen::<u32>(),
-                    rng.gen::<u32>()
+                    rng.random::<u32>(),
+                    rng.random::<u32>(),
+                    rng.random::<u32>(),
+                    rng.random::<u32>(),
+                    rng.random::<u32>()
                 );
                 let content = format!("{}", i,);
                 (file_name, content.into_bytes())
@@ -752,7 +752,7 @@ mod tests {
         let config = Config::default().blocksize(1);
 
         let mut data = [0u8; 100];
-        rand::thread_rng().fill_bytes(&mut data);
+        rand::rng().fill_bytes(&mut data);
         let data = data.to_vec();
 
         let files = vec![("huge_file".to_string(), data.clone())];
@@ -800,7 +800,7 @@ mod tests {
         let config = Config::default().blocksize(blocksize);
 
         let mut data = [0u8; 100];
-        rand::thread_rng().fill_bytes(&mut data);
+        rand::rng().fill_bytes(&mut data);
         let data = data.to_vec();
 
         let files = vec![("huge_file".to_string(), data.clone())];
