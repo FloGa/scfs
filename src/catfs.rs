@@ -402,7 +402,7 @@ mod tests {
     use std::ops::Deref;
 
     use fuser::BackgroundSession;
-    use rand::{thread_rng, Rng, RngCore};
+    use rand::{rng, Rng, RngCore};
     use tempfile::{tempdir, TempDir};
 
     use crate::mount;
@@ -450,17 +450,18 @@ mod tests {
         num_files: usize,
         max_num_fragments: usize,
     ) -> Vec<(String, Vec<u8>)> {
-        let mut rng = thread_rng();
+        let mut rng = rng();
 
         (0..num_files)
             .flat_map(|file_num| {
-                let max_num_fragments = rng.gen_range(1..max_num_fragments);
+                let max_num_fragments = rng.random_range(1..max_num_fragments);
                 (0..max_num_fragments)
                     .map(|fragment_num| {
                         let file_name = format!("file_{}/scfs.{:010}", file_num, fragment_num);
 
-                        let fragment_size = if fragment_num == max_num_fragments - 1 && rng.gen() {
-                            rng.gen_range(1..(blocksize + 1))
+                        let fragment_size = if fragment_num == max_num_fragments - 1 && rng.random()
+                        {
+                            rng.random_range(1..(blocksize + 1))
                         } else {
                             blocksize
                         };
