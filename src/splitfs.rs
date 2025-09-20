@@ -222,7 +222,7 @@ impl Filesystem for SplitFS {
         Shared::lookup(self, _req, parent, name, reply);
     }
 
-    fn getattr(&mut self, _req: &Request, ino: u64, reply: ReplyAttr) {
+    fn getattr(&mut self, _req: &Request, ino: u64, _fh: Option<u64>, reply: ReplyAttr) {
         if ino == INO_CONFIG {
             let attr = self.get_config_attr();
             reply.attr(&TTL, &attr);

@@ -191,7 +191,7 @@ impl Filesystem for CatFS {
         Shared::lookup(self, _req, parent, name, reply);
     }
 
-    fn getattr(&mut self, _req: &Request, ino: u64, reply: ReplyAttr) {
+    fn getattr(&mut self, _req: &Request, ino: u64, _fh: Option<u64>, reply: ReplyAttr) {
         Shared::getattr(self, _req, ino, reply);
     }
 
