@@ -1,4 +1,4 @@
-# Changes in 0.10.6-RC
+# Changes in 0.10.6
 
 -   Upgrade rusqlite to 0.39.0
 
