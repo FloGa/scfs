@@ -1,3 +1,5 @@
+# Changes in 0.10.6-RC
+
 # Changes in 0.10.5
 
 -   Update dependencies for security fixes
