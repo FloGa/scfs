@@ -402,7 +402,7 @@ mod tests {
     use std::ops::Deref;
 
     use fuser::BackgroundSession;
-    use rand::{rng, Rng, RngCore};
+    use rand::{rng, Rng, RngExt};
     use tempfile::{tempdir, TempDir};
 
     use crate::mount;

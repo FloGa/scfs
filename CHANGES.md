@@ -1,3 +1,11 @@
+# Changes in 0.10.6
+
+-   Upgrade rusqlite to 0.39.0
+
+-   Upgrade rand to 0.10.1
+
+-   Update dependencies
+
 # Changes in 0.10.5
 
 -   Update dependencies for security fixes

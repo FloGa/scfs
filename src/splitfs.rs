@@ -433,7 +433,7 @@ mod tests {
     use std::path::PathBuf;
 
     use fuser::BackgroundSession;
-    use rand::{Rng, RngCore};
+    use rand::{Rng, RngExt};
     use tempfile::{tempdir, TempDir};
 
     use crate::mount;
